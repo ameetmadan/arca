@@ -26,12 +26,20 @@ func cosineSim(a, b []float32) float32 {
 // cluster groups vecs into k clusters using k-means with k-means++ init.
 // k = clamp(√n, 2, sortMaxClusters).
 func cluster(vecs [][]float32) [][]int {
+	if len(vecs) == 0 {
+		return nil
+	}
+	if len(vecs) == 1 {
+		return [][]int{{0}}
+	}
 	n := len(vecs)
 	k := clampInt(int(math.Sqrt(float64(n))), 2, sortMaxClusters)
 	dim := len(vecs[0])
 
 	// k-means++ init: first seed random, each subsequent seed is the point
 	// farthest from its nearest existing seed.
+	// Note: if all vectors are identical, all seeds will be the same index.
+	// The algorithm still converges to one non-empty cluster without panicking.
 	seeds := make([]int, k)
 	seeds[0] = rand.IntN(n)
 	for i := 1; i < k; i++ {
