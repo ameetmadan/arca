@@ -16,12 +16,14 @@ import (
 
 	"github.com/ameetmadan/arca/internal/config"
 	"github.com/ameetmadan/arca/internal/modelmanager"
+	"github.com/ameetmadan/arca/internal/sorter"
 	"github.com/ameetmadan/arca/internal/watcher"
 )
 
 type server struct {
-	app *config.App
-	mm  *modelmanager.Manager
+	app    *config.App
+	mm     *modelmanager.Manager
+	sorter *sorter.Sorter
 }
 
 func main() {
@@ -56,7 +58,15 @@ func main() {
 	defer cancel()
 	go w.Run(ctx)
 
-	srv := &server{app: app, mm: mm}
+	srv := &server{
+		app: app,
+		mm:  mm,
+		sorter: &sorter.Sorter{
+			LLM:    app.LLMProvider,
+			Embed:  app.EmbedProvider,
+			Parser: app.Parser,
+		},
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
