@@ -170,3 +170,50 @@ func (e *errLLM) GenerateSync(_ context.Context, _ string) (string, error) {
 func (e *errLLM) Generate(_ context.Context, _ string) (io.Reader, error) {
 	return nil, os.ErrInvalid
 }
+
+func TestSort_EmbedFailureSkipsFile(t *testing.T) {
+	dir := t.TempDir()
+
+	// Three files: two succeed embedding, one fails.
+	pathA := writeFile(t, dir, "a.txt", "report content")
+	pathB := writeFile(t, dir, "b.txt", "report content two")
+	pathC := writeFile(t, dir, "c.txt", "should fail embed")
+
+	mp := &mockParser{chunks: map[string][]parser.Chunk{
+		pathA: {{Content: "report content"}},
+		pathB: {{Content: "report content two"}},
+		pathC: {{Content: "should fail embed"}},
+	}}
+
+	s := &Sorter{
+		LLM:    &mockLLM{},
+		Embed:  &partialErrEmbed{failOn: "should fail embed"},
+		Parser: mp,
+	}
+
+	moves, err := s.Sort(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("Sort should not error on embed failure: %v", err)
+	}
+	// Only 2 files should have moves (c.txt was skipped).
+	if len(moves) != 2 {
+		t.Errorf("expected 2 moves, got %d", len(moves))
+	}
+	for _, mv := range moves {
+		if mv.File == "c.txt" {
+			t.Error("c.txt should have been skipped due to embed failure")
+		}
+	}
+}
+
+// partialErrEmbed fails for a specific text value, succeeds for others.
+type partialErrEmbed struct {
+	failOn string
+}
+
+func (p *partialErrEmbed) Embed(_ context.Context, text string) ([]float32, error) {
+	if strings.Contains(text, p.failOn) {
+		return nil, os.ErrInvalid
+	}
+	return []float32{0.99, 0.14}, nil
+}
