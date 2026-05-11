@@ -72,3 +72,17 @@ func TestClampInt(t *testing.T) {
 		}
 	}
 }
+
+func TestCluster_SingleVector(t *testing.T) {
+	clusters := cluster([][]float32{{1, 0}})
+	if len(clusters) != 1 || len(clusters[0]) != 1 || clusters[0][0] != 0 {
+		t.Errorf("expected [[0]], got %v", clusters)
+	}
+}
+
+func TestCluster_Empty(t *testing.T) {
+	clusters := cluster(nil)
+	if clusters != nil {
+		t.Errorf("expected nil, got %v", clusters)
+	}
+}
