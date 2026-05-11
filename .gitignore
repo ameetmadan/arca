@@ -1,0 +1,27 @@
+# Go
+backend/vendor/
+backend/*.test
+backend/coverage.out
+
+# Swift / Xcode
+app/.build/
+app/*.xcodeproj/xcuserdata/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+DerivedData/
+
+# Models (large binaries)
+*.gguf
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Env / secrets
+.env
+*.local
+
+# IDE
+.idea/
+.vscode/
