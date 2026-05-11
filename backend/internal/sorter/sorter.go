@@ -171,8 +171,8 @@ func (s *Sorter) nameCluster(ctx context.Context, paths, texts []string, vecs []
 	if name == "" {
 		return fmt.Sprintf("group-%d", fallbackN)
 	}
-	if len(name) > 50 {
-		name = name[:50]
+	if len([]rune(name)) > 50 {
+		name = string([]rune(name)[:50])
 	}
 	return name
 }
