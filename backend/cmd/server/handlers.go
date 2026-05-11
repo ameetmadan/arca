@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -11,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/ameetmadan/arca/internal/modelmanager"
+	"github.com/ameetmadan/arca/internal/sorter"
 )
 
 // modelPathUpdater is implemented by LlamaCppProvider (both CGo and stub).
@@ -61,11 +61,6 @@ func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	apiResponse(w, http.StatusOK, map[string]int{"indexed": len(chunks)}, "")
 }
 
-type SortMove struct {
-	File            string `json:"file"`
-	SuggestedFolder string `json:"suggested_folder"`
-}
-
 // POST /api/sort — sort / categorise files in a folder
 func (s *server) handleSort(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -76,50 +71,22 @@ func (s *server) handleSort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var filenames []string
-	err := filepath.WalkDir(req.Folder, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		rel, _ := filepath.Rel(req.Folder, path)
-		filenames = append(filenames, rel)
-		return nil
-	})
+	moves, err := s.sorter.Sort(r.Context(), req.Folder)
 	if err != nil {
-		apiResponse(w, http.StatusBadRequest, nil, fmt.Sprintf("read folder: %v", err))
+		apiResponse(w, http.StatusInternalServerError, nil, err.Error())
 		return
 	}
-	if len(filenames) == 0 {
-		apiResponse(w, http.StatusOK, map[string][]SortMove{"moves": {}}, "")
-		return
+	if moves == nil {
+		moves = []sorter.SortMove{}
 	}
-
-	fileList := strings.Join(filenames, "\n")
-	prompt := fmt.Sprintf(
-		"Suggest a folder organisation for these files (paths are relative to the root folder):\n\n%s\n\nRespond as a JSON array where each element is {\"file\": \"<relative-path>\", \"suggested_folder\": \"<folder>\"}. Output only valid JSON, no explanation.",
-		fileList,
-	)
-
-	raw, err := s.app.LLMProvider.GenerateSync(r.Context(), prompt)
-	if err != nil {
-		apiResponse(w, http.StatusServiceUnavailable, nil, err.Error())
-		return
-	}
-
-	moves, err := parseSortMoves(raw)
-	if err != nil {
-		apiResponse(w, http.StatusInternalServerError, nil, fmt.Sprintf("parse suggestions: %v", err))
-		return
-	}
-
-	apiResponse(w, http.StatusOK, map[string][]SortMove{"moves": moves}, "")
+	apiResponse(w, http.StatusOK, map[string][]sorter.SortMove{"moves": moves}, "")
 }
 
 // POST /api/sort/apply — execute the moves returned by /api/sort
 func (s *server) handleSortApply(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Folder string     `json:"folder"`
-		Moves  []SortMove `json:"moves"`
+		Folder string            `json:"folder"`
+		Moves  []sorter.SortMove `json:"moves"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Folder == "" {
 		apiResponse(w, http.StatusBadRequest, nil, "folder and moves required")
@@ -155,21 +122,6 @@ func (s *server) handleSortApply(w http.ResponseWriter, r *http.Request) {
 		result["errors"] = errs
 	}
 	apiResponse(w, http.StatusOK, result, "")
-}
-
-// parseSortMoves extracts a JSON array of SortMove from raw LLM output.
-func parseSortMoves(raw string) ([]SortMove, error) {
-	// Find the first '[' and last ']' to handle any surrounding text.
-	start := strings.Index(raw, "[")
-	end := strings.LastIndex(raw, "]")
-	if start < 0 || end <= start {
-		return nil, fmt.Errorf("no JSON array found in LLM output")
-	}
-	var moves []SortMove
-	if err := json.Unmarshal([]byte(raw[start:end+1]), &moves); err != nil {
-		return nil, err
-	}
-	return moves, nil
 }
 
 // GET /api/chat — SSE streaming chat over indexed documents
