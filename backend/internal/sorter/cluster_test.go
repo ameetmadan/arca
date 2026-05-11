@@ -60,6 +60,22 @@ func TestCluster_TwoFiles(t *testing.T) {
 	}
 }
 
+func TestCluster_ThreeFiles(t *testing.T) {
+	// 3 distinct vectors → k=2, should produce 2 clusters totalling 3 files
+	vecs := [][]float32{{1, 0, 0}, {0.9, 0.1, 0}, {0, 1, 0}}
+	clusters := cluster(vecs)
+	if len(clusters) != 2 {
+		t.Fatalf("expected 2 clusters, got %d", len(clusters))
+	}
+	total := 0
+	for _, c := range clusters {
+		total += len(c)
+	}
+	if total != 3 {
+		t.Errorf("expected 3 total assignments, got %d", total)
+	}
+}
+
 func TestClampInt(t *testing.T) {
 	tests := []struct{ v, lo, hi, want int }{
 		{1, 2, 20, 2},

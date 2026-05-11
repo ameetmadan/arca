@@ -70,6 +70,9 @@ func (s *Sorter) Sort(ctx context.Context, folder string) ([]SortMove, error) {
 			end = len(texts)
 		}
 		for j := i; j < end; j++ {
+			if err := ctx.Err(); err != nil {
+				return nil, fmt.Errorf("sorter: %w", err)
+			}
 			vec, err := s.Embed.Embed(ctx, texts[j])
 			if err != nil {
 				log.Printf("sorter: embed %s: %v", relPaths[j], err)
