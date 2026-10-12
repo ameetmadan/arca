@@ -83,9 +83,8 @@ make backend
 
 Both write `backend/arca-server`.
 
-> Heads up: `backend/arca-server`, `app/Sources/Arca/Resources/arca-server` and `dist/Arca.app`
-> are currently tracked in git, so rebuilding changes tracked files. Don't commit rebuilt binaries
-> with unrelated changes.
+> Note: `backend/arca-server`, `app/Sources/Arca/Resources/arca-server` and `dist/` are build
+> outputs and are git-ignored. `make clean` removes them.
 
 ### 3. Build the app (macOS only)
 
