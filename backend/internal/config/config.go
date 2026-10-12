@@ -1,13 +1,18 @@
 package config
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/ameetmadan/arca/internal/executor"
+	"github.com/ameetmadan/arca/pkg/decision"
+	"github.com/ameetmadan/arca/pkg/decision/rules"
 	"github.com/ameetmadan/arca/pkg/embed"
 	"github.com/ameetmadan/arca/pkg/embed/nomic"
 	"github.com/ameetmadan/arca/pkg/llm"
@@ -52,6 +57,9 @@ type File struct {
 	Models struct {
 		Dir string `yaml:"dir"`
 	} `yaml:"models"`
+
+	// Decision is optional; see DecisionConfig for the defaults.
+	Decision DecisionConfig `yaml:"decision"`
 }
 
 // App holds all wired provider instances.
@@ -63,6 +71,31 @@ type App struct {
 	VectorStore   vector.VectorStore
 	SQLEngine     sqlengine.SQLEngine
 	Parser        parser.DocumentParser
+
+	// Decision is the engine chain (rules -> semantic -> llm by default).
+	Decision decision.Engine
+	// Rules is the rules engine inside Decision, or nil if the chain has no
+	// rules step. It is exposed so a rules API can reload it after a save.
+	Rules *rules.Engine
+	// Executor is the only code that moves user files. It is nil when the
+	// journal could not be opened; callers must refuse to move files then.
+	Executor *executor.Executor
+	// Workers are background jobs for the server to run until shutdown, each
+	// returning when its context is cancelled.
+	Workers []func(ctx context.Context)
+
+	closers []func()
+}
+
+// Close releases resources the App opened itself (currently the executor's
+// journal). It is safe to call more than once. Providers are closed by the
+// caller.
+func (a *App) Close() {
+	closers := a.closers
+	a.closers = nil
+	for i := len(closers) - 1; i >= 0; i-- {
+		closers[i]()
+	}
 }
 
 // PersistModelPaths rewrites config.yaml with updated LLM and embed model paths.
@@ -139,6 +172,27 @@ func Load(path string) (*App, error) {
 	}
 	app.Parser = parser.NewMultiParser()
 
+	// The journal lives next to config.yaml, in the Arca app dir.
+	appDir := filepath.Dir(path)
+	exec, closeJournal, err := wireExecutor(appDir)
+	if err != nil {
+		log.Printf("executor: journal unavailable, file moves are disabled: %v", err)
+	}
+	app.Executor = exec
+	app.closers = append(app.closers, closeJournal)
+
+	dec, err := wireDecision(&cfg, decisionDeps{
+		LLM:    app.LLMProvider,
+		Embed:  app.EmbedProvider,
+		Parser: app.Parser,
+		AppDir: appDir,
+	})
+	if err != nil {
+		app.Close()
+		return nil, err
+	}
+	app.Decision, app.Rules, app.Workers = dec.Engine, dec.Rules, dec.Workers
+
 	return app, nil
 }
 
@@ -155,6 +209,9 @@ func expandPaths(cfg *File) {
 	cfg.Vector.DBPath = exp(cfg.Vector.DBPath)
 	cfg.SQL.DBPath = exp(cfg.SQL.DBPath)
 	cfg.Models.Dir = exp(cfg.Models.Dir)
+	for i := range cfg.Decision.Engines {
+		cfg.Decision.Engines[i].RulesPath = exp(cfg.Decision.Engines[i].RulesPath)
+	}
 	for i, f := range cfg.Watcher.Folders {
 		cfg.Watcher.Folders[i] = exp(f)
 	}
