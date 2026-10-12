@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3" // registers the "sqlite3" driver
@@ -146,9 +147,20 @@ func (s *Store) Get(ctx context.Context, id int64) (decisions.Record, error) {
 
 // List implements decisions.Store.
 func (s *Store) List(ctx context.Context, f decisions.ListFilter) (decisions.Page, error) {
-	where, args := "", []any{}
+	var conds []string
+	args := []any{}
 	if f.Status != "" {
-		where, args = " WHERE status = ?", append(args, string(f.Status))
+		conds, args = append(conds, "status = ?"), append(args, string(f.Status))
+	}
+	if f.Root != "" {
+		conds, args = append(conds, "root = ?"), append(args, f.Root)
+	}
+	if f.File != "" {
+		conds, args = append(conds, "file = ?"), append(args, f.File)
+	}
+	where := ""
+	if len(conds) > 0 {
+		where = " WHERE " + strings.Join(conds, " AND ")
 	}
 	page := decisions.Page{Items: []decisions.Record{}, Limit: f.Limit, Offset: f.Offset}
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM decisions`+where, args...).Scan(&page.Total); err != nil {
