@@ -57,7 +57,8 @@ func (m *MemStore) List(_ context.Context, f decisions.ListFilter) (decisions.Pa
 	defer m.mu.Unlock()
 	var match []decisions.Record
 	for _, r := range m.records {
-		if f.Status == "" || r.Status == f.Status {
+		if (f.Status == "" || r.Status == f.Status) &&
+			(f.Root == "" || r.Root == f.Root) && (f.File == "" || r.File == f.File) {
 			match = append(match, clone(r))
 		}
 	}

@@ -493,3 +493,31 @@ func TestPolicy_Validation(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestCountPending(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	for _, f := range []string{"a.pdf", "b.pdf", "b.pdf"} {
+		if res, err := e.svc.Submit(ctx, root, f, move(0.5)); err != nil || res.Record == nil {
+			t.Fatalf("Submit: %+v %v", res, err)
+		}
+	}
+	if _, err := e.svc.Reject(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := e.svc.CountPending(ctx, root, ""); err != nil || n != 2 {
+		t.Fatalf("pending in root = %d, %v; want 2", n, err)
+	}
+	if n, _ := e.svc.CountPending(ctx, root, "b.pdf"); n != 2 {
+		t.Fatalf("pending b.pdf = %d, want 2", n)
+	}
+	if n, _ := e.svc.CountPending(ctx, root, "a.pdf"); n != 0 {
+		t.Fatalf("pending a.pdf = %d, want 0 (rejected)", n)
+	}
+	if n, _ := e.svc.CountPending(ctx, "/elsewhere", ""); n != 0 {
+		t.Fatalf("pending elsewhere = %d, want 0", n)
+	}
+	if _, err := e.svc.CountPending(ctx, "relative", ""); !errors.Is(err, decisions.ErrInvalid) {
+		t.Fatalf("relative root: err = %v, want ErrInvalid", err)
+	}
+}
