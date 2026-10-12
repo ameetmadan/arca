@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -32,8 +33,12 @@ func (w *Watcher) RemoveFolder(path string) error {
 	return w.fsw.Remove(path)
 }
 
-// Run processes file system events until ctx is cancelled.
+// Run processes file system events until ctx is cancelled. It returns only
+// after all in-flight index notifications have finished or been cancelled.
 func (w *Watcher) Run(ctx context.Context) {
+	var notifications sync.WaitGroup
+	defer notifications.Wait()
+
 	debounce := make(map[string]time.Time)
 	const debounceWindow = 500 * time.Millisecond
 
@@ -55,7 +60,11 @@ func (w *Watcher) Run(ctx context.Context) {
 				continue
 			}
 			debounce[event.Name] = time.Now()
-			go w.notifyIndex(event.Name)
+			notifications.Add(1)
+			go func() {
+				defer notifications.Done()
+				w.notifyIndex(ctx, event.Name)
+			}()
 
 		case err, ok := <-w.fsw.Errors:
 			if !ok {
@@ -66,11 +75,19 @@ func (w *Watcher) Run(ctx context.Context) {
 	}
 }
 
-func (w *Watcher) notifyIndex(path string) {
+func (w *Watcher) notifyIndex(ctx context.Context, path string) {
 	body := strings.NewReader(`{"path":"` + path + `"}`)
-	resp, err := http.Post(w.indexURL, "application/json", body) //nolint:noctx
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.indexURL, body)
 	if err != nil {
-		log.Printf("watcher: notify index failed: %v", err)
+		log.Printf("watcher: build index request failed: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		if ctx.Err() == nil {
+			log.Printf("watcher: notify index failed: %v", err)
+		}
 		return
 	}
 	resp.Body.Close()

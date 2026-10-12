@@ -54,10 +54,6 @@ func main() {
 		}
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go w.Run(ctx)
-
 	srv := &server{
 		app: app,
 		mm:  mm,
@@ -85,19 +81,25 @@ func main() {
 	addr := fmt.Sprintf("localhost:%d", app.Cfg.Server.Port)
 	httpSrv := &http.Server{Addr: addr, Handler: r}
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 	go func() {
-		log.Printf("arca backend listening on %s", addr)
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("listen: %v", err)
-		}
+		// Restore default signal handling after the first signal so a second
+		// Ctrl-C force-quits a shutdown that is taking too long.
+		<-ctx.Done()
+		stop()
 	}()
 
-	<-quit
-	cancel()
-	log.Println("shutting down")
+	err = run(ctx, runConfig{
+		Server:  httpSrv,
+		Workers: []func(context.Context){w.Run},
+		Closers: closersOf(app.VectorStore, app.SQLEngine),
+	})
+	if err != nil {
+		// Fatal only after run has stopped workers and closed resources.
+		log.Fatalf("serve: %v", err)
+	}
+	log.Println("stopped")
 }
 
 func corsMiddleware(next http.Handler) http.Handler {

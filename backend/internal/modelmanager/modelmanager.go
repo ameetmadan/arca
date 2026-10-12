@@ -108,7 +108,12 @@ func (m *Manager) Download(ctx context.Context, modelID string) (<-chan Progress
 	go func() {
 		defer close(ch)
 		if err := m.downloadFile(ctx, target, dest, ch); err != nil {
-			ch <- ProgressEvent{ModelID: modelID, Error: err.Error()}
+			// Never block on a consumer that has gone away (client
+			// disconnect or server shutdown cancels ctx).
+			select {
+			case ch <- ProgressEvent{ModelID: modelID, Error: err.Error()}:
+			case <-ctx.Done():
+			}
 		}
 	}()
 
@@ -164,7 +169,10 @@ func (m *Manager) downloadFile(ctx context.Context, model *Model, dest string, c
 		return err
 	}
 
-	ch <- ProgressEvent{ModelID: model.ID, Downloaded: pr.downloaded, Total: pr.total, Percent: 100, Done: true}
+	select {
+	case ch <- ProgressEvent{ModelID: model.ID, Downloaded: pr.downloaded, Total: pr.total, Percent: 100, Done: true}:
+	case <-ctx.Done():
+	}
 	return nil
 }
 
