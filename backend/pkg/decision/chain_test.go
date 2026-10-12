@@ -59,6 +59,13 @@ func TestChainDecide(t *testing.T) {
 			wantCalls:  []int{1, 0},
 		},
 		{
+			name:       "engine-provided source is preserved",
+			engines:    []*fakeEngine{{dec: Decision{Action: Move, Target: "A", Confidence: 1, Reason: "test", Source: "rule:invoices"}}},
+			thresholds: []float64{1},
+			want:       Decision{Action: Move, Target: "A", Confidence: 1, Reason: "test", Source: "rule:invoices"},
+			wantCalls:  []int{1},
+		},
+		{
 			name:       "confidence exactly at threshold is accepted",
 			engines:    []*fakeEngine{{dec: mv("A", 0.8)}},
 			thresholds: []float64{0.8},

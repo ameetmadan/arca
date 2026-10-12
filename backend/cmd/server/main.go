@@ -17,7 +17,6 @@ import (
 	"github.com/ameetmadan/arca/internal/pipeline"
 	"github.com/ameetmadan/arca/internal/sorter"
 	"github.com/ameetmadan/arca/internal/watcher"
-	"github.com/ameetmadan/arca/pkg/decision/rules"
 )
 
 type server struct {
@@ -46,7 +45,6 @@ func main() {
 	}
 	mm := modelmanager.New(modelsDir)
 
-	exec, closeJournal := newExecutor(filepath.Dir(defaultConfigPath()))
 	srv := &server{
 		app: app,
 		mm:  mm,
@@ -55,10 +53,8 @@ func main() {
 			Embed:  app.EmbedProvider,
 			Parser: app.Parser,
 		},
-		exec: exec,
-		// The rules engine is wired in internal/config; once it exists, pass it
-		// here as the second argument so edits take effect without a restart.
-		rules: newRulesAPI(rules.NewFileStore(defaultRulesPath()), nil),
+		exec:  app.Executor,
+		rules: newRulesAPI(rulesStore(app), rulesReloader(app)),
 	}
 
 	// File events flow watcher -> pipeline -> indexer in-process; the HTTP
@@ -90,8 +86,8 @@ func main() {
 
 	err = run(ctx, runConfig{
 		Server:  httpSrv,
-		Workers: []func(context.Context){events.Run, w.Run},
-		Closers: append(closersOf(app.VectorStore, app.SQLEngine), closeJournal),
+		Workers: append([]func(context.Context){events.Run, w.Run}, app.Workers...),
+		Closers: append(closersOf(app.VectorStore, app.SQLEngine), app.Close),
 	})
 	if err != nil {
 		// Fatal only after run has stopped workers and closed resources.

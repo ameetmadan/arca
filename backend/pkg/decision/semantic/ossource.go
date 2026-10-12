@@ -37,6 +37,13 @@ type OSSource struct {
 	// MaxTextBytes truncates the text returned per file; zero means
 	// DefaultMaxTextBytes.
 	MaxTextBytes int
+	// Describe, if set, derives the text for a regular, non-empty file at the
+	// given absolute path, capped at maxBytes, in place of the built-in
+	// Parser-then-metadata logic. internal/config sets it to the function the
+	// pipeline's Facts builder uses, so that file vectors and folder vectors
+	// come from the same text. The path has already been checked to be a
+	// visible regular file directly inside the requested folder.
+	Describe func(path string, maxBytes int) string
 }
 
 var _ Source = (*OSSource)(nil)
@@ -138,6 +145,9 @@ func (s *OSSource) Text(ctx context.Context, root, rel, name string) (string, er
 	limit := s.MaxTextBytes
 	if limit <= 0 {
 		limit = DefaultMaxTextBytes
+	}
+	if s.Describe != nil {
+		return s.Describe(full, limit), nil
 	}
 	if s.Parser != nil {
 		if chunks, err := s.Parser.Parse(full); err == nil && len(chunks) > 0 && chunks[0].Content != "" {

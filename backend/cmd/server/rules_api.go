@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ameetmadan/arca/internal/config"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ameetmadan/arca/pkg/decision"
@@ -631,4 +632,23 @@ func (a *rulesAPI) handleTest(w http.ResponseWriter, r *http.Request) {
 // and show nothing while it is empty.
 func (a *rulesAPI) handleSuggestions(w http.ResponseWriter, _ *http.Request) {
 	apiResponse(w, http.StatusOK, map[string]any{"suggestions": []any{}}, "")
+}
+
+// rulesStore returns the store the rules API edits. It is the file the live
+// rules engine was loaded from (so API edits and the engine agree), or the
+// default rules file when the chain has no rules step.
+func rulesStore(app *config.App) rules.Store {
+	if app.RulesPath != "" {
+		return rules.NewFileStore(app.RulesPath)
+	}
+	return rules.NewFileStore(defaultRulesPath())
+}
+
+// rulesReloader returns the live rules engine, or nil when there is none.
+// It avoids returning a typed nil pointer inside the interface.
+func rulesReloader(app *config.App) ruleReloader {
+	if app.Rules == nil {
+		return nil
+	}
+	return app.Rules
 }
