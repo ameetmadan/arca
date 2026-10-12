@@ -188,3 +188,8 @@ func (s *SQLiteVecStore) Delete(_ context.Context, id string) error {
 	}
 	return tx.Commit()
 }
+
+// Ping reports whether the underlying database connection is usable.
+func (s *SQLiteVecStore) Ping(ctx context.Context) error {
+	return s.db.PingContext(ctx)
+}
