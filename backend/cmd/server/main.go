@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/ameetmadan/arca/internal/config"
+	"github.com/ameetmadan/arca/internal/executor"
 	"github.com/ameetmadan/arca/internal/modelmanager"
 	"github.com/ameetmadan/arca/internal/sorter"
 	"github.com/ameetmadan/arca/internal/watcher"
@@ -21,6 +22,7 @@ type server struct {
 	app    *config.App
 	mm     *modelmanager.Manager
 	sorter *sorter.Sorter
+	exec   *executor.Executor // nil when the journal could not be opened
 }
 
 func main() {
@@ -51,6 +53,8 @@ func main() {
 		}
 	}
 
+	exec, closeJournal := newExecutor(filepath.Dir(defaultConfigPath()))
+
 	srv := &server{
 		app: app,
 		mm:  mm,
@@ -59,6 +63,7 @@ func main() {
 			Embed:  app.EmbedProvider,
 			Parser: app.Parser,
 		},
+		exec: exec,
 	}
 
 	r := srv.routes() // see routes.go
@@ -78,7 +83,7 @@ func main() {
 	err = run(ctx, runConfig{
 		Server:  httpSrv,
 		Workers: []func(context.Context){w.Run},
-		Closers: closersOf(app.VectorStore, app.SQLEngine),
+		Closers: append(closersOf(app.VectorStore, app.SQLEngine), closeJournal),
 	})
 	if err != nil {
 		// Fatal only after run has stopped workers and closed resources.

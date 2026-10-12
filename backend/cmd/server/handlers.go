@@ -2,15 +2,18 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/ameetmadan/arca/internal/executor"
 	"github.com/ameetmadan/arca/internal/modelmanager"
 	"github.com/ameetmadan/arca/internal/sorter"
+	"github.com/ameetmadan/arca/pkg/decision"
 )
 
 // modelPathUpdater is implemented by LlamaCppProvider (both CGo and stub).
@@ -82,25 +85,42 @@ func (s *server) handleSortApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.exec == nil {
+		apiResponse(w, http.StatusServiceUnavailable, nil, "file executor unavailable")
+		return
+	}
+	if !filepath.IsAbs(req.Folder) {
+		apiResponse(w, http.StatusBadRequest, nil, "folder must be an absolute path")
+		return
+	}
+
+	// The Executor is the only code that touches files: it keeps every move
+	// inside req.Folder, never overwrites, and journals each move for undo.
 	var applied, skipped int
 	var errs []string
 	for _, m := range req.Moves {
-		src := filepath.Join(req.Folder, m.File)
-		if _, err := os.Stat(src); err != nil {
+		if r.Context().Err() != nil { // client gone or server shutting down
+			break
+		}
+		d := decision.Decision{
+			Action:     decision.Move,
+			Target:     m.SuggestedFolder,
+			Confidence: 1, // the user chose to apply this suggestion
+			Reason:     "applied from sort suggestion",
+			Source:     "user",
+		}
+		_, err := s.exec.Execute(r.Context(), req.Folder, d, m.File)
+		switch {
+		case err == nil:
+			applied++
+		case errors.Is(err, executor.ErrInvalidRoot):
+			apiResponse(w, http.StatusBadRequest, nil, "folder is not an existing directory")
+			return
+		case errors.Is(err, fs.ErrNotExist), errors.Is(err, executor.ErrAlreadyInPlace):
 			skipped++
-			continue
-		}
-		destDir := filepath.Join(req.Folder, m.SuggestedFolder)
-		if err := os.MkdirAll(destDir, 0o755); err != nil {
-			errs = append(errs, fmt.Sprintf("mkdir %s: %v", destDir, err))
-			continue
-		}
-		dst := filepath.Join(destDir, filepath.Base(m.File))
-		if err := os.Rename(src, dst); err != nil {
+		default:
 			errs = append(errs, fmt.Sprintf("move %s: %v", m.File, err))
-			continue
 		}
-		applied++
 	}
 
 	result := map[string]interface{}{
