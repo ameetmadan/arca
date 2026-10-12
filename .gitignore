@@ -25,3 +25,8 @@ DerivedData/
 # IDE
 .idea/
 .vscode/
+
+# Build artifacts (produced by `make backend|bundle|dist`)
+backend/arca-server
+app/Sources/Arca/Resources/arca-server
+dist/
