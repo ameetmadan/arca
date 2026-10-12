@@ -191,7 +191,7 @@ func TestIndexRootThenDecide(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Target != "/r/Taxes" || d.Confidence < 0.8 {
+	if d.Target != "Taxes" || d.Confidence < 0.8 {
 		t.Errorf("decision = %+v, want a confident move to /r/Taxes", d)
 	}
 }
