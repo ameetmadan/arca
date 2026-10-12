@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/rwcarlsen/goexif/exif"
 
@@ -22,10 +23,7 @@ import (
 // files (name starts with "."), and unreadable files.
 func Text(p parser.DocumentParser, path string, maxContent int) string {
 	info, err := os.Stat(path)
-	if err != nil || info.Size() == 0 {
-		return ""
-	}
-	if strings.HasPrefix(filepath.Base(path), ".") {
+	if err != nil || Skip(path, info) {
 		return ""
 	}
 
@@ -33,6 +31,12 @@ func Text(p parser.DocumentParser, path string, maxContent int) string {
 		return content
 	}
 	return Fallback(path, info)
+}
+
+// Skip reports whether a file has nothing worth describing: it is empty or
+// hidden (its name starts with ".").
+func Skip(path string, info os.FileInfo) bool {
+	return info.Size() == 0 || strings.HasPrefix(filepath.Base(path), ".")
 }
 
 // FirstChunk returns the content of the first chunk the parser yields for
@@ -48,7 +52,11 @@ func FirstChunk(p parser.DocumentParser, path string, maxContent int) string {
 	}
 	content := chunks[0].Content
 	if maxContent > 0 && len(content) > maxContent {
-		content = content[:maxContent]
+		n := maxContent
+		for n > 0 && !utf8.RuneStart(content[n]) { // do not cut a multi-byte character in half
+			n--
+		}
+		content = content[:n]
 	}
 	return content
 }

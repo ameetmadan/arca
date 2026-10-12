@@ -69,6 +69,14 @@ func TestEXIF_NilForNonImagesAndGarbage(t *testing.T) {
 	}
 }
 
+func TestFirstChunk_DoesNotSplitMultiByteCharacters(t *testing.T) {
+	fp := fakeParser{chunks: []parser.Chunk{{Content: "aé"}}} // "é" is 2 bytes
+	got := FirstChunk(fp, "x", 2)                              // would cut "é" in half
+	if got != "a" {
+		t.Fatalf("got %q, want %q", got, "a")
+	}
+}
+
 func TestFirstChunk_NilParser(t *testing.T) {
 	if got := FirstChunk(nil, "x", 0); got != "" {
 		t.Fatalf("got %q", got)
