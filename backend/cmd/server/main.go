@@ -24,6 +24,7 @@ type server struct {
 	mm     *modelmanager.Manager
 	sorter *sorter.Sorter
 	exec   *executor.Executor // nil when the journal could not be opened
+	rules  *rulesAPI          // /api/v1/rules; see rules_api.go
 }
 
 func main() {
@@ -52,7 +53,8 @@ func main() {
 			Embed:  app.EmbedProvider,
 			Parser: app.Parser,
 		},
-		exec: app.Executor,
+		exec:  app.Executor,
+		rules: newRulesAPI(rulesStore(app), rulesReloader(app)),
 	}
 
 	// File events flow watcher -> pipeline -> indexer in-process; the HTTP

@@ -79,6 +79,8 @@ type decisionWiring struct {
 	Steps []decision.Step
 	// Rules is the rules engine in the chain, or nil if the chain has none.
 	Rules *rules.Engine
+	// RulesPath is the file Rules was loaded from (empty if there is no rules step).
+	RulesPath string
 	// Workers are background jobs to run for the lifetime of the server, such
 	// as the semantic engine's folder indexer. Each returns when ctx is cancelled.
 	Workers []func(ctx context.Context)
@@ -163,6 +165,7 @@ func wireRules(w *decisionWiring, ec EngineConfig, deps decisionDeps) (decision.
 		log.Printf("decision: rules: %v", issue)
 	}
 	w.Rules = e
+	w.RulesPath = path
 	return e, nil
 }
 
