@@ -1,28 +1,37 @@
-// Package watcher uses FSEvents (via fsnotify) to watch folders and notify the indexer.
+// Package watcher uses FSEvents (via fsnotify) to watch folders and publish
+// file events to a sink, normally pipeline.Pipeline.Submit. It does no
+// debouncing or indexing itself; the pipeline owns both.
 package watcher
 
 import (
 	"context"
+	"errors"
 	"log"
-	"net/http"
-	"strings"
-	"sync"
-	"time"
 
 	"github.com/fsnotify/fsnotify"
+
+	"github.com/ameetmadan/arca/internal/pipeline"
 )
 
+// Sink receives file events. It is called from the watcher's single event
+// loop, so it must not block; pipeline.Pipeline.Submit never does.
+type Sink func(pipeline.Event)
+
 type Watcher struct {
-	fsw      *fsnotify.Watcher
-	indexURL string
+	fsw  *fsnotify.Watcher
+	sink Sink
 }
 
-func New(indexURL string) (*Watcher, error) {
+// New returns a Watcher that publishes events to sink.
+func New(sink Sink) (*Watcher, error) {
+	if sink == nil {
+		return nil, errors.New("watcher: sink is required")
+	}
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
 	}
-	return &Watcher{fsw: fsw, indexURL: indexURL}, nil
+	return &Watcher{fsw: fsw, sink: sink}, nil
 }
 
 func (w *Watcher) AddFolder(path string) error {
@@ -33,15 +42,9 @@ func (w *Watcher) RemoveFolder(path string) error {
 	return w.fsw.Remove(path)
 }
 
-// Run processes file system events until ctx is cancelled. It returns only
-// after all in-flight index notifications have finished or been cancelled.
+// Run publishes file system events to the sink until ctx is cancelled, then
+// closes the underlying watcher and returns.
 func (w *Watcher) Run(ctx context.Context) {
-	var notifications sync.WaitGroup
-	defer notifications.Wait()
-
-	debounce := make(map[string]time.Time)
-	const debounceWindow = 500 * time.Millisecond
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -52,19 +55,9 @@ func (w *Watcher) Run(ctx context.Context) {
 			if !ok {
 				return
 			}
-			if !isRelevant(event) {
-				continue
+			if op, relevant := opFor(event); relevant {
+				w.sink(pipeline.Event{Op: op, Path: event.Name})
 			}
-			last := debounce[event.Name]
-			if time.Since(last) < debounceWindow {
-				continue
-			}
-			debounce[event.Name] = time.Now()
-			notifications.Add(1)
-			go func() {
-				defer notifications.Done()
-				w.notifyIndex(ctx, event.Name)
-			}()
 
 		case err, ok := <-w.fsw.Errors:
 			if !ok {
@@ -75,24 +68,17 @@ func (w *Watcher) Run(ctx context.Context) {
 	}
 }
 
-func (w *Watcher) notifyIndex(ctx context.Context, path string) {
-	body := strings.NewReader(`{"path":"` + path + `"}`)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.indexURL, body)
-	if err != nil {
-		log.Printf("watcher: build index request failed: %v", err)
-		return
+// opFor maps an fsnotify event to a pipeline op. When several bits are set the
+// most final one wins: Remove, then Create, then Write. Chmod and Rename are
+// not relevant.
+func opFor(e fsnotify.Event) (pipeline.Op, bool) {
+	switch {
+	case e.Has(fsnotify.Remove):
+		return pipeline.Removed, true
+	case e.Has(fsnotify.Create):
+		return pipeline.Created, true
+	case e.Has(fsnotify.Write):
+		return pipeline.Modified, true
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		if ctx.Err() == nil {
-			log.Printf("watcher: notify index failed: %v", err)
-		}
-		return
-	}
-	resp.Body.Close()
-}
-
-func isRelevant(e fsnotify.Event) bool {
-	return e.Has(fsnotify.Create) || e.Has(fsnotify.Write) || e.Has(fsnotify.Remove)
+	return 0, false
 }
