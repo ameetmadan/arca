@@ -42,7 +42,8 @@ type scored struct {
 	score float64
 }
 
-// Decide returns a Move to the existing folder most similar to f.Vector.
+// Decide returns a Move to the existing folder most similar to f.Vector. The
+// Target is the folder's path relative to its root, as the Executor requires.
 //
 // It returns decision.ErrNoDecision when f.Vector is unusable, when fewer than
 // two indexed folders can be compared with it, or when the best similarity is
@@ -92,8 +93,10 @@ func (e *Engine) Decide(ctx context.Context, f decision.Facts) (decision.Decisio
 	}
 
 	return decision.Decision{
-		Action:     decision.Move,
-		Target:     filepath.Join(best.f.Root, filepath.FromSlash(best.f.Rel)),
+		Action: decision.Move,
+		// Relative to the root, like the rules and llm engines, because that
+		// is what the Executor accepts (it rejects absolute targets).
+		Target:     filepath.FromSlash(best.f.Rel),
 		Confidence: e.t.Confidence(best.score, second.score),
 		Reason:     fmt.Sprintf("closest to the %d files in %s", best.f.FileCount, best.f.Rel),
 		Source:     Name,

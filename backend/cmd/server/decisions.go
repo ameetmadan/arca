@@ -145,7 +145,7 @@ func (s *server) handleDecisionAccept(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Target *string `json:"target"`
 	}
-	if err := decodeBody(w, r, &req, true); err != nil {
+	if err := decodeDecisionBody(w, r, &req, true); err != nil {
 		s.decisionError(w, r, err, "")
 		return
 	}
@@ -237,7 +237,7 @@ func (s *server) handleFolderPolicyPut(w http.ResponseWriter, r *http.Request) {
 		Mode          *string  `json:"mode"`
 		AutoThreshold *float64 `json:"auto_threshold"`
 	}
-	if err := decodeBody(w, r, &req, false); err != nil {
+	if err := decodeDecisionBody(w, r, &req, false); err != nil {
 		s.decisionError(w, r, err, "")
 		return
 	}
@@ -289,10 +289,10 @@ func intParam(v, name string) (int, error) {
 	return n, nil
 }
 
-// decodeBody reads one JSON object into dst. Unknown fields are rejected so a
+// decodeDecisionBody reads one JSON object into dst. Unknown fields are rejected so a
 // typo is reported rather than ignored. With allowEmpty a missing body is
 // treated as {}.
-func decodeBody(w http.ResponseWriter, r *http.Request, dst any, allowEmpty bool) error {
+func decodeDecisionBody(w http.ResponseWriter, r *http.Request, dst any, allowEmpty bool) error {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJSONBody))
 	dec.DisallowUnknownFields()
 	err := dec.Decode(dst)

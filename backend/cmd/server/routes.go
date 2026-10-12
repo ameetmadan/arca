@@ -37,6 +37,7 @@ func (s *server) routesWith(logger *slog.Logger, limiter *rateLimiter) http.Hand
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(limiter.middleware)
 		s.apiRoutes(r)
+		s.rulesRoutes(r) // new in v1: no legacy /api alias
 	})
 
 	// Deprecated: unversioned aliases kept for one release so an older Swift

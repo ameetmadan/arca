@@ -77,7 +77,9 @@ type Decision struct {
 	Confidence float64
 	// Reason is a short human-readable explanation. It must not contain file contents.
 	Reason string
-	// Source is the name of the engine that produced the decision. Chain sets it.
+	// Source says where the decision came from, e.g. "semantic" or
+	// "rule:invoices". An engine may set it to be more specific than its name;
+	// Chain fills in the step name when the engine leaves it empty.
 	Source string
 }
 

@@ -25,6 +25,7 @@ type server struct {
 	mm     *modelmanager.Manager
 	sorter *sorter.Sorter
 	exec   *executor.Executor // nil when the journal could not be opened
+	rules  *rulesAPI          // /api/v1/rules; see rules_api.go
 
 	decisions *decisions.Service // nil when the queue database could not be opened
 }
@@ -47,8 +48,7 @@ func main() {
 	}
 	mm := modelmanager.New(modelsDir)
 
-	exec, closeJournal := newExecutor(filepath.Dir(defaultConfigPath()))
-	decSvc, closeDecisions := newDecisionService(filepath.Dir(defaultConfigPath()), exec)
+	decSvc, closeDecisions := newDecisionService(filepath.Dir(defaultConfigPath()), app.Executor)
 	srv := &server{
 		decisions: decSvc,
 		app:       app,
@@ -58,7 +58,8 @@ func main() {
 			Embed:  app.EmbedProvider,
 			Parser: app.Parser,
 		},
-		exec: exec,
+		exec:  app.Executor,
+		rules: newRulesAPI(rulesStore(app), rulesReloader(app)),
 	}
 
 	// File events flow watcher -> pipeline -> indexer in-process; the HTTP
@@ -90,8 +91,8 @@ func main() {
 
 	err = run(ctx, runConfig{
 		Server:  httpSrv,
-		Workers: []func(context.Context){events.Run, w.Run},
-		Closers: append(closersOf(app.VectorStore, app.SQLEngine), closeJournal, closeDecisions),
+		Workers: append([]func(context.Context){events.Run, w.Run}, app.Workers...),
+		Closers: append(closersOf(app.VectorStore, app.SQLEngine), app.Close, closeDecisions),
 	})
 	if err != nil {
 		// Fatal only after run has stopped workers and closed resources.

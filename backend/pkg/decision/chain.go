@@ -73,7 +73,9 @@ func NewChain(steps ...Step) (*Chain, error) {
 }
 
 // Decide asks each engine in order and returns the first decision that meets
-// its engine's MinConfidence, with Decision.Source set to the engine's name.
+// its engine's MinConfidence. Decision.Source is kept as the engine set it, so
+// a rules engine can report "rule:invoices"; if the engine left it empty, it is
+// set to the step's name.
 //
 // Engines that return ErrNoDecision, or a decision below their threshold, are
 // skipped. If no engine produces an acceptable decision, Decide returns an
@@ -105,7 +107,9 @@ func (c *Chain) Decide(ctx context.Context, f Facts) (Decision, error) {
 		}
 		// A NaN confidence compares false here and therefore never clears a threshold.
 		if d.Confidence >= s.MinConfidence {
-			d.Source = s.Name
+			if d.Source == "" {
+				d.Source = s.Name
+			}
 			return d, nil
 		}
 	}
