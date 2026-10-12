@@ -78,6 +78,26 @@ func TestConfidenceStaysInRange(t *testing.T) {
 	}
 }
 
+// TestDocumentedConfidenceExamples pins the examples in the package doc so the
+// documentation cannot drift away from the formula.
+func TestDocumentedConfidenceExamples(t *testing.T) {
+	tn := DefaultTunables()
+	for _, tt := range []struct{ s1, s2, want float64 }{
+		{0.90, 0.30, 0.91},
+		{0.80, 0.60, 0.87},
+		{0.80, 0.78, 0.27},
+		{0.50, 0.10, 0.75},
+	} {
+		if got := tn.Confidence(tt.s1, tt.s2); math.Abs(got-tt.want) > 0.005 {
+			t.Errorf("Confidence(%v, %v) = %.3f, documented as %.2f", tt.s1, tt.s2, got, tt.want)
+		}
+	}
+	// A perfect tie of two perfect matches is the most a tie can score.
+	if got, max := tn.Confidence(1, 1), (1-tn.MarginWeight)*tn.MaxConfidence; math.Abs(got-max) > 1e-9 {
+		t.Errorf("Confidence(1, 1) = %v, want %v", got, max)
+	}
+}
+
 func TestConfidenceGrowsWithMargin(t *testing.T) {
 	tn := DefaultTunables()
 	prev := -1.0
