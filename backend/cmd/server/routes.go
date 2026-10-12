@@ -74,4 +74,5 @@ func (s *server) apiRoutes(r chi.Router) {
 	r.Get("/models", s.handleModels)
 	r.Get("/models/download", s.handleModelDownload)
 	r.Post("/models/activate", s.handleModelActivate)
+	s.decisionRoutes(r)
 }

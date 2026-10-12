@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/ameetmadan/arca/internal/config"
+	"github.com/ameetmadan/arca/internal/decisions"
 	"github.com/ameetmadan/arca/internal/executor"
 	"github.com/ameetmadan/arca/internal/modelmanager"
 	"github.com/ameetmadan/arca/internal/pipeline"
@@ -25,6 +26,8 @@ type server struct {
 	sorter *sorter.Sorter
 	exec   *executor.Executor // nil when the journal could not be opened
 	rules  *rulesAPI          // /api/v1/rules; see rules_api.go
+
+	decisions *decisions.Service // nil when the queue database could not be opened
 }
 
 func main() {
@@ -45,9 +48,11 @@ func main() {
 	}
 	mm := modelmanager.New(modelsDir)
 
+	decSvc, closeDecisions := newDecisionService(filepath.Dir(defaultConfigPath()), app.Executor)
 	srv := &server{
-		app: app,
-		mm:  mm,
+		decisions: decSvc,
+		app:       app,
+		mm:        mm,
 		sorter: &sorter.Sorter{
 			LLM:    app.LLMProvider,
 			Embed:  app.EmbedProvider,
@@ -87,7 +92,7 @@ func main() {
 	err = run(ctx, runConfig{
 		Server:  httpSrv,
 		Workers: append([]func(context.Context){events.Run, w.Run}, app.Workers...),
-		Closers: append(closersOf(app.VectorStore, app.SQLEngine), app.Close),
+		Closers: append(closersOf(app.VectorStore, app.SQLEngine), app.Close, closeDecisions),
 	})
 	if err != nil {
 		// Fatal only after run has stopped workers and closed resources.
