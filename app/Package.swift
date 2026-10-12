@@ -9,6 +9,13 @@ let package = Package(
             name: "Arca",
             path: "Sources/Arca",
             resources: [.process("Resources")]
+        ),
+        // Pure-logic tests (JSON decoding, request shapes). Run with `swift test`;
+        // `swift build` does not build this target.
+        .testTarget(
+            name: "ArcaTests",
+            dependencies: ["Arca"],
+            path: "Tests/ArcaTests"
         )
     ]
 )

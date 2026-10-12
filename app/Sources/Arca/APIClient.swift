@@ -40,6 +40,56 @@ actor APIClient {
         return try decode(SortApplyResult.self, from: data)
     }
 
+    // MARK: - Rules (docs/api/rules.md)
+
+    func listRules() async throws -> RuleList {
+        try await rulesCall(RuleList.self, url: rulesBase, method: "GET")
+    }
+
+    func createRule(_ draft: RuleDraft) async throws -> RuleSaved {
+        try await rulesCall(RuleSaved.self, url: rulesBase, method: "POST", body: JSONEncoder().encode(draft))
+    }
+
+    func updateRule(id: String, draft: RuleDraft) async throws -> RuleSaved {
+        try await rulesCall(RuleSaved.self, url: rulesBase.appending(component: id), method: "PUT", body: JSONEncoder().encode(draft))
+    }
+
+    func deleteRule(id: String) async throws -> RuleDeleted {
+        try await rulesCall(RuleDeleted.self, url: rulesBase.appending(component: id), method: "DELETE")
+    }
+
+    func setRuleOrder(_ ids: [String]) async throws -> RuleOrderResult {
+        try await rulesCall(RuleOrderResult.self, url: rulesBase.appending(component: "order"), method: "PUT", body: JSONEncoder().encode(RuleOrderRequest(order: ids)))
+    }
+
+    func validateRule(_ draft: RuleDraft) async throws -> RuleValidation {
+        try await rulesCall(RuleValidation.self, url: rulesBase.appending(component: "validate"), method: "POST", body: JSONEncoder().encode(draft))
+    }
+
+    func testRule(_ draft: RuleDraft, facts: RuleFacts) async throws -> RuleTestResult {
+        let body = try JSONEncoder().encode(RuleTestRequest(rule: draft, facts: facts))
+        return try await rulesCall(RuleTestResult.self, url: rulesBase.appending(component: "test"), method: "POST", body: body)
+    }
+
+    func ruleSuggestions() async throws -> RuleSuggestionList {
+        try await rulesCall(RuleSuggestionList.self, url: rulesBase.appending(component: "suggestions"), method: "GET")
+    }
+
+    private var rulesBase: URL { base.appending(path: "/api/v1/rules") }
+
+    // The rules API reports field-level problems as 409/422 with data.issues, so
+    // these calls decode by HTTP status (see RulesResponseDecoder) instead of
+    // through `decode(_:from:)`.
+    private func rulesCall<T: Decodable>(_ type: T.Type, url: URL, method: String, body: Data? = nil) async throws -> T {
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = body
+        let (data, response) = try await session.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        return try RulesResponseDecoder.decode(type, from: data, status: status)
+    }
+
     // MARK: - Chat (SSE)
 
     nonisolated func chat(question: String) -> AsyncThrowingStream<String, Error> {

@@ -18,7 +18,7 @@ struct ArcaApp: App {
         }
 
         Settings {
-            SettingsView()
+            SettingsTabsView()
                 .environmentObject(appState)
         }
     }
