@@ -172,17 +172,22 @@ func (s *server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	buf := make([]byte, 512)
-	for {
+	for r.Context().Err() == nil { // client gone or server shutting down
 		n, err := reader.Read(buf)
 		if n > 0 {
 			token := string(buf[:n])
 			b, _ := json.Marshal(map[string]string{"token": token})
-			fmt.Fprintf(w, "data: %s\n\n", b)
+			if _, werr := fmt.Fprintf(w, "data: %s\n\n", b); werr != nil {
+				return
+			}
 			flusher.Flush()
 		}
 		if err != nil {
 			break
 		}
+	}
+	if r.Context().Err() != nil {
+		return
 	}
 	fmt.Fprint(w, "data: {\"done\":true}\n\n")
 	flusher.Flush()
@@ -283,10 +288,19 @@ func (s *server) handleModelDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for ev := range ch {
-		if err := modelmanager.SSEWrite(w, ev); err != nil {
+	for {
+		select {
+		case <-r.Context().Done():
+			// Download sees the same context and stops on its own.
 			return
+		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
+			if err := modelmanager.SSEWrite(w, ev); err != nil {
+				return
+			}
+			flusher.Flush()
 		}
-		flusher.Flush()
 	}
 }
