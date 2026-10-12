@@ -77,6 +77,9 @@ type App struct {
 	// Rules is the rules engine inside Decision, or nil if the chain has no
 	// rules step. It is exposed so a rules API can reload it after a save.
 	Rules *rules.Engine
+	// RulesPath is the file Rules was loaded from. The rules API must edit the
+	// same file; it is empty when the chain has no rules step.
+	RulesPath string
 	// Executor is the only code that moves user files. It is nil when the
 	// journal could not be opened; callers must refuse to move files then.
 	Executor *executor.Executor
@@ -192,6 +195,7 @@ func Load(path string) (*App, error) {
 		return nil, err
 	}
 	app.Decision, app.Rules, app.Workers = dec.Engine, dec.Rules, dec.Workers
+	app.RulesPath = dec.RulesPath
 
 	return app, nil
 }
