@@ -14,6 +14,7 @@ import (
 	"github.com/ameetmadan/arca/internal/config"
 	"github.com/ameetmadan/arca/internal/executor"
 	"github.com/ameetmadan/arca/internal/modelmanager"
+	"github.com/ameetmadan/arca/internal/pipeline"
 	"github.com/ameetmadan/arca/internal/sorter"
 	"github.com/ameetmadan/arca/internal/watcher"
 )
@@ -43,18 +44,7 @@ func main() {
 	}
 	mm := modelmanager.New(modelsDir)
 
-	w, err := watcher.New(fmt.Sprintf("http://localhost:%d/api/v1/index", app.Cfg.Server.Port))
-	if err != nil {
-		log.Fatalf("create watcher: %v", err)
-	}
-	for _, folder := range app.Cfg.Watcher.Folders {
-		if err := w.AddFolder(folder); err != nil {
-			log.Printf("watcher: add %s: %v", folder, err)
-		}
-	}
-
 	exec, closeJournal := newExecutor(filepath.Dir(defaultConfigPath()))
-
 	srv := &server{
 		app: app,
 		mm:  mm,
@@ -64,6 +54,19 @@ func main() {
 			Parser: app.Parser,
 		},
 		exec: exec,
+	}
+
+	// File events flow watcher -> pipeline -> indexer in-process; the HTTP
+	// endpoint POST /api/v1/index runs the same indexer.
+	events := pipeline.New(srv.indexer().Handle, pipeline.Options{Debounce: pipeline.DefaultDebounce})
+	w, err := watcher.New(events.Submit)
+	if err != nil {
+		log.Fatalf("create watcher: %v", err)
+	}
+	for _, folder := range app.Cfg.Watcher.Folders {
+		if err := w.AddFolder(folder); err != nil {
+			log.Printf("watcher: add %s: %v", folder, err)
+		}
 	}
 
 	r := srv.routes() // see routes.go
@@ -82,7 +85,7 @@ func main() {
 
 	err = run(ctx, runConfig{
 		Server:  httpSrv,
-		Workers: []func(context.Context){w.Run},
+		Workers: []func(context.Context){events.Run, w.Run},
 		Closers: append(closersOf(app.VectorStore, app.SQLEngine), closeJournal),
 	})
 	if err != nil {
