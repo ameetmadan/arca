@@ -152,6 +152,22 @@ func (s *Service) List(ctx context.Context, f ListFilter) (Page, error) {
 	return p, nil
 }
 
+// CountPending returns how many decisions are waiting for the user in the
+// watched folder root. A non-empty file narrows the count to that file
+// (relative to root). The pipeline uses it to stop suggesting for a folder
+// whose queue is not being worked through, and to avoid queueing the same file
+// twice.
+func (s *Service) CountPending(ctx context.Context, root, file string) (int, error) {
+	if err := validateRoot(root); err != nil {
+		return 0, err
+	}
+	p, err := s.d.Queue.List(ctx, ListFilter{Status: StatusPending, Root: root, File: file, Limit: 1})
+	if err != nil {
+		return 0, fmt.Errorf("count pending decisions: %w", err)
+	}
+	return p.Total, nil
+}
+
 // Accept carries out a pending decision through the Executor, so path
 // containment, no-overwrite and journalling all apply. A non-empty target
 // replaces the suggested target; it is required for ask_user decisions.

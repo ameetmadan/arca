@@ -89,6 +89,11 @@ var (
 type ListFilter struct {
 	// Status restricts the result to one status; empty means all.
 	Status Status
+	// Root restricts the result to one watched folder; empty means all.
+	Root string
+	// File restricts the result to one file (relative to its root); empty
+	// means all.
+	File   string
 	Limit  int
 	Offset int
 }

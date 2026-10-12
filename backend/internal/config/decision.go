@@ -45,6 +45,11 @@ const (
 // lists no engines, the chain is rules -> semantic -> llm with default thresholds.
 type DecisionConfig struct {
 	Engines []EngineConfig `yaml:"engines"`
+	// MaxPendingPerFolder is the backpressure limit: once a watched folder
+	// has more than this many decisions waiting in the queue, the watcher
+	// stops generating new ones for it. Zero or omitted means the default
+	// (pipeline.DefaultMaxPending, 50).
+	MaxPendingPerFolder int `yaml:"max_pending_per_folder"`
 }
 
 // EngineConfig configures one step of the decision chain.

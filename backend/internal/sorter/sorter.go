@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"math"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	"github.com/ameetmadan/arca/pkg/decision"
 	"github.com/ameetmadan/arca/pkg/embed"
 	"github.com/ameetmadan/arca/pkg/llm"
 	"github.com/ameetmadan/arca/pkg/parser"
@@ -18,12 +20,54 @@ const (
 	sortBatchSize       = 25
 	sortRepresentatives = 5
 	sortSnippetLen      = 200
+
+	// ClusterMaxConfidence caps the confidence of a cluster decision. The
+	// cluster name is an LLM guess about files the user has not placed yet,
+	// so it stays below the default auto-apply threshold (0.9): batch
+	// suggestions are for the user to review (ADR-0007, cold start).
+	ClusterMaxConfidence = 0.8
+	// clusterMinConfidence is the floor for a cluster of two or more files.
+	clusterMinConfidence = 0.1
+	// clusterSingleConfidence is the confidence of a one-file cluster, whose
+	// folder is just derived from the file name.
+	clusterSingleConfidence = 0.3
+
+	// ClusterSource is the Decision.Source of every decision the sorter makes.
+	ClusterSource = "cluster"
 )
 
 // SortMove describes where one file should be moved.
 type SortMove struct {
 	File            string `json:"file"`
 	SuggestedFolder string `json:"suggested_folder"`
+}
+
+// Suggestion is one file's batch-sort result as a decision. File is relative
+// to the sorted folder, and Decision.Target is a folder relative to it too, as
+// the Executor requires.
+type Suggestion struct {
+	File     string
+	Decision decision.Decision
+}
+
+// clusterMove is the internal result of the embed -> cluster -> name pipeline.
+type clusterMove struct {
+	file     string
+	folder   string
+	size     int     // files in the cluster
+	cohesion float64 // mean cosine similarity of the members to their centroid
+}
+
+func (cm clusterMove) decision() decision.Decision {
+	d := decision.Decision{Action: decision.Move, Target: cm.folder, Source: ClusterSource}
+	if cm.size <= 1 {
+		d.Confidence = clusterSingleConfidence
+		d.Reason = fmt.Sprintf("cluster of one file: nothing similar to group it with, so the folder %q is named after the file", cm.folder)
+		return d
+	}
+	d.Confidence = math.Min(math.Max(cm.cohesion, clusterMinConfidence), ClusterMaxConfidence)
+	d.Reason = fmt.Sprintf("cluster %q: %d files with similar content", cm.folder, cm.size)
+	return d
 }
 
 // Sorter runs the embed→cluster→name pipeline.
@@ -33,8 +77,37 @@ type Sorter struct {
 	Parser parser.DocumentParser
 }
 
-// Sort returns suggested moves for all files under folder.
+// Sort returns suggested moves for all files under folder. It is the response
+// shape of POST /api/v1/sort that the Swift client reads.
 func (s *Sorter) Sort(ctx context.Context, folder string) ([]SortMove, error) {
+	cms, err := s.sortClusters(ctx, folder)
+	if err != nil {
+		return nil, err
+	}
+	var moves []SortMove
+	for _, cm := range cms {
+		moves = append(moves, SortMove{File: cm.file, SuggestedFolder: cm.folder})
+	}
+	return moves, nil
+}
+
+// Suggest runs the same pipeline as Sort and returns each move as a
+// decision.Decision (Source "cluster"), ready to be submitted to the decision
+// queue like any other engine's answer (ADR-0006).
+func (s *Sorter) Suggest(ctx context.Context, folder string) ([]Suggestion, error) {
+	cms, err := s.sortClusters(ctx, folder)
+	if err != nil {
+		return nil, err
+	}
+	var out []Suggestion
+	for _, cm := range cms {
+		out = append(out, Suggestion{File: cm.file, Decision: cm.decision()})
+	}
+	return out, nil
+}
+
+// sortClusters embeds, clusters and names the files under folder.
+func (s *Sorter) sortClusters(ctx context.Context, folder string) ([]clusterMove, error) {
 	var relPaths, texts []string
 
 	err := filepath.WalkDir(folder, func(path string, d fs.DirEntry, err error) error {
@@ -87,7 +160,7 @@ func (s *Sorter) Sort(ctx context.Context, folder string) ([]SortMove, error) {
 
 	// Single-file shortcut: skip clustering entirely.
 	if len(good) == 1 {
-		return []SortMove{{File: good[0].rel, SuggestedFolder: deriveFolder(good[0].rel)}}, nil
+		return []clusterMove{{file: good[0].rel, folder: deriveFolder(good[0].rel), size: 1}}, nil
 	}
 
 	vecs := make([][]float32, len(good))
@@ -97,7 +170,7 @@ func (s *Sorter) Sort(ctx context.Context, folder string) ([]SortMove, error) {
 
 	clusters := cluster(vecs)
 
-	var moves []SortMove
+	var moves []clusterMove
 	for gi, idxs := range clusters {
 		cpaths := make([]string, len(idxs))
 		ctexts := make([]string, len(idxs))
@@ -108,17 +181,17 @@ func (s *Sorter) Sort(ctx context.Context, folder string) ([]SortMove, error) {
 			cvecs[i] = good[idx].vec
 		}
 		name := s.nameCluster(ctx, cpaths, ctexts, cvecs, gi+1)
+		coh := cohesion(cvecs)
 		for _, p := range cpaths {
-			moves = append(moves, SortMove{File: p, SuggestedFolder: name})
+			moves = append(moves, clusterMove{file: p, folder: name, size: len(cpaths), cohesion: coh})
 		}
 	}
 	return moves, nil
 }
 
-func (s *Sorter) nameCluster(ctx context.Context, paths, texts []string, vecs [][]float32, fallbackN int) string {
-	// Compute centroid.
-	dim := len(vecs[0])
-	centroid := make([]float32, dim)
+// centroidOf returns the mean of vecs, which must not be empty.
+func centroidOf(vecs [][]float32) []float32 {
+	centroid := make([]float32, len(vecs[0]))
 	for _, v := range vecs {
 		for d, x := range v {
 			centroid[d] += x
@@ -128,6 +201,22 @@ func (s *Sorter) nameCluster(ctx context.Context, paths, texts []string, vecs []
 	for d := range centroid {
 		centroid[d] /= n
 	}
+	return centroid
+}
+
+// cohesion is the mean cosine similarity of vecs to their centroid: close to
+// 1 for a tight group, lower for a loose one.
+func cohesion(vecs [][]float32) float64 {
+	c := centroidOf(vecs)
+	var sum float64
+	for _, v := range vecs {
+		sum += float64(cosineSim(v, c))
+	}
+	return sum / float64(len(vecs))
+}
+
+func (s *Sorter) nameCluster(ctx context.Context, paths, texts []string, vecs [][]float32, fallbackN int) string {
+	centroid := centroidOf(vecs)
 
 	// Pick representatives closest to centroid.
 	type rep struct {

@@ -88,6 +88,44 @@ func RunContract(t *testing.T, newBackend func(t *testing.T) Backend) {
 		}
 	})
 
+	t.Run("list filters by root and file", func(t *testing.T) {
+		b := newBackend(t)
+		for _, r := range []decisions.Record{
+			rec("/r", "a.pdf", decisions.StatusPending),
+			rec("/r", "b.pdf", decisions.StatusPending),
+			rec("/r", "a.pdf", decisions.StatusRejected),
+			rec("/other", "a.pdf", decisions.StatusPending),
+		} {
+			if _, err := b.Insert(ctx, r); err != nil {
+				t.Fatal(err)
+			}
+		}
+		count := func(f decisions.ListFilter) int {
+			t.Helper()
+			f.Limit = 100
+			p, err := b.List(ctx, f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.Total != len(p.Items) {
+				t.Fatalf("total %d != %d items", p.Total, len(p.Items))
+			}
+			return p.Total
+		}
+		if n := count(decisions.ListFilter{Root: "/r"}); n != 3 {
+			t.Fatalf("root /r = %d, want 3", n)
+		}
+		if n := count(decisions.ListFilter{Root: "/r", Status: decisions.StatusPending}); n != 2 {
+			t.Fatalf("pending in /r = %d, want 2", n)
+		}
+		if n := count(decisions.ListFilter{Root: "/r", File: "a.pdf", Status: decisions.StatusPending}); n != 1 {
+			t.Fatalf("pending a.pdf in /r = %d, want 1", n)
+		}
+		if n := count(decisions.ListFilter{File: "a.pdf"}); n != 3 {
+			t.Fatalf("a.pdf anywhere = %d, want 3", n)
+		}
+	})
+
 	t.Run("transition is guarded by status", func(t *testing.T) {
 		b := newBackend(t)
 		r, _ := b.Insert(ctx, rec("/r", "a.txt", decisions.StatusPending))
