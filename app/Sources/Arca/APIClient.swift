@@ -17,7 +17,7 @@ actor APIClient {
     // MARK: - Index
 
     func index(path: String) async throws -> IndexResult {
-        var req = request(path: "/api/index", method: "POST")
+        var req = request(path: "/api/v1/index", method: "POST")
         req.httpBody = try JSONEncoder().encode(["path": path])
         let (data, _) = try await session.data(for: req)
         return try decode(IndexResult.self, from: data)
@@ -26,7 +26,7 @@ actor APIClient {
     // MARK: - Sort
 
     func sort(folder: String) async throws -> SortResult {
-        var req = request(path: "/api/sort", method: "POST")
+        var req = request(path: "/api/v1/sort", method: "POST")
         req.httpBody = try JSONEncoder().encode(["folder": folder])
         let (data, _) = try await session.data(for: req)
         return try decode(SortResult.self, from: data)
@@ -34,7 +34,7 @@ actor APIClient {
 
     func applySort(folder: String, moves: [SortMove]) async throws -> SortApplyResult {
         struct Body: Encodable { let folder: String; let moves: [SortMove] }
-        var req = request(path: "/api/sort/apply", method: "POST")
+        var req = request(path: "/api/v1/sort/apply", method: "POST")
         req.httpBody = try JSONEncoder().encode(Body(folder: folder, moves: moves))
         let (data, _) = try await session.data(for: req)
         return try decode(SortApplyResult.self, from: data)
@@ -45,7 +45,7 @@ actor APIClient {
     nonisolated func chat(question: String) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             Task {
-                let url = base.appending(path: "/api/chat").appending(queryItems: [.init(name: "q", value: question)])
+                let url = base.appending(path: "/api/v1/chat").appending(queryItems: [.init(name: "q", value: question)])
                 let (bytes, _) = try await session.bytes(from: url)
                 for try await line in bytes.lines {
                     if line.hasPrefix("data: ") {
@@ -67,7 +67,7 @@ actor APIClient {
     // MARK: - Query
 
     func query(question: String, schemaHint: String = "") async throws -> QueryResult {
-        var req = request(path: "/api/query", method: "POST")
+        var req = request(path: "/api/v1/query", method: "POST")
         req.httpBody = try JSONEncoder().encode(["question": question, "schema_hint": schemaHint])
         let (data, _) = try await session.data(for: req)
         return try decode(QueryResult.self, from: data)
@@ -76,13 +76,13 @@ actor APIClient {
     // MARK: - Models
 
     func models() async throws -> [ModelStatus] {
-        let req = request(path: "/api/models", method: "GET")
+        let req = request(path: "/api/v1/models", method: "GET")
         let (data, _) = try await session.data(for: req)
         return try decode([ModelStatus].self, from: data)
     }
 
     func activateModel(id: String) async throws {
-        var req = request(path: "/api/models/activate", method: "POST")
+        var req = request(path: "/api/v1/models/activate", method: "POST")
         req.httpBody = try JSONEncoder().encode(["id": id])
         let (data, _) = try await session.data(for: req)
         _ = try decode([String: String].self, from: data)
@@ -93,7 +93,7 @@ actor APIClient {
     nonisolated func downloadModel(id: String) -> AsyncThrowingStream<DownloadProgress, Error> {
         AsyncThrowingStream { continuation in
             Task {
-                let url = base.appending(path: "/api/models/download").appending(queryItems: [.init(name: "id", value: id)])
+                let url = base.appending(path: "/api/v1/models/download").appending(queryItems: [.init(name: "id", value: id)])
                 let (bytes, _) = try await session.bytes(from: url)
                 for try await line in bytes.lines {
                     if line.hasPrefix("data: ") {
@@ -144,9 +144,16 @@ actor APIClient {
 
 // MARK: - Response types
 
+// Mirrors the backend envelope: {"data": ..., "error": null, "meta": {"timestamp": "<RFC3339>"}}.
+// `error` is null on success and a message string on failure; `data` is null on failure.
 private struct APIEnvelope<T: Decodable>: Decodable {
     let data: T?
     let error: String?
+    let meta: APIMeta?
+}
+
+private struct APIMeta: Decodable {
+    let timestamp: String?
 }
 
 enum APIError: LocalizedError {

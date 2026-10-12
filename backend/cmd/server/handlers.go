@@ -18,17 +18,6 @@ type modelPathUpdater interface {
 	UpdateModelPath(path string)
 }
 
-// apiResponse wraps all responses in a consistent envelope.
-func apiResponse(w http.ResponseWriter, status int, data interface{}, apiErr string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
-		"data":  data,
-		"error": apiErr,
-		"meta":  map[string]string{"version": "1"},
-	})
-}
-
 // POST /api/index — index a file or directory
 func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	var req struct {
