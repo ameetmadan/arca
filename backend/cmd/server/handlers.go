@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -10,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/ameetmadan/arca/internal/modelmanager"
+	"github.com/ameetmadan/arca/internal/pipeline"
 	"github.com/ameetmadan/arca/internal/sorter"
 )
 
@@ -28,26 +31,40 @@ func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chunks, err := s.app.Parser.Parse(req.Path)
+	indexed, err := s.indexer().IndexFile(r.Context(), req.Path)
 	if err != nil {
-		apiResponse(w, http.StatusUnprocessableEntity, nil, err.Error())
+		apiResponse(w, indexStatus(err), nil, err.Error())
 		return
 	}
 
-	for i, chunk := range chunks {
-		vec, err := s.app.EmbedProvider.Embed(r.Context(), chunk.Content)
-		if err != nil {
-			apiResponse(w, http.StatusServiceUnavailable, nil, fmt.Sprintf("embed chunk %d: %v", i, err))
-			return
-		}
-		id := fmt.Sprintf("%s#%d", req.Path, i)
-		if err := s.app.VectorStore.Upsert(r.Context(), id, vec, chunk.Metadata); err != nil {
-			apiResponse(w, http.StatusInternalServerError, nil, fmt.Sprintf("upsert chunk %d: %v", i, err))
-			return
+	apiResponse(w, http.StatusOK, map[string]int{"indexed": indexed}, "")
+}
+
+// indexer returns the parse -> embed -> upsert stage. The watcher pipeline
+// runs the same code (see main).
+func (s *server) indexer() *pipeline.Indexer {
+	return &pipeline.Indexer{
+		Parser: s.app.Parser,
+		Embed:  s.app.EmbedProvider,
+		Store:  s.app.VectorStore,
+	}
+}
+
+// indexStatus maps an indexing failure to the HTTP status POST /index returns.
+func indexStatus(err error) int {
+	var ie *pipeline.IndexError
+	if errors.As(err, &ie) {
+		switch ie.Stage {
+		case pipeline.StageParse:
+			return http.StatusUnprocessableEntity
+		case pipeline.StageEmbed:
+			return http.StatusServiceUnavailable
 		}
 	}
-
-	apiResponse(w, http.StatusOK, map[string]int{"indexed": len(chunks)}, "")
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return http.StatusServiceUnavailable
+	}
+	return http.StatusInternalServerError
 }
 
 // POST /api/sort — sort / categorise files in a folder
