@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"runtime/debug"
 	"time"
 
@@ -67,6 +68,9 @@ func newRequestID() string {
 func newJSONLogger(w io.Writer) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(w, nil))
 }
+
+// appLogger is the structured logger shared by middleware and handlers.
+var appLogger = newJSONLogger(os.Stderr)
 
 // accessLog writes one structured line per request. It deliberately logs only
 // the path (never the query string, which carries chat questions) and no

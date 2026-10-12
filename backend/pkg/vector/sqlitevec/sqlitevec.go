@@ -29,3 +29,5 @@ func (s *SQLiteVecStore) Search(_ context.Context, _ []float32, _ int) ([]vector
 func (s *SQLiteVecStore) Delete(_ context.Context, _ string) error {
 	return ErrNotBuilt
 }
+
+func (s *SQLiteVecStore) Ping(_ context.Context) error { return ErrNotBuilt }
