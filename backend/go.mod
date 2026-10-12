@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6
+	github.com/expr-lang/expr v1.17.8
 	github.com/fsnotify/fsnotify v1.6.0
 	github.com/go-chi/chi/v5 v5.0.12
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
