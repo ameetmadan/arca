@@ -17,6 +17,7 @@ import (
 	"github.com/ameetmadan/arca/internal/pipeline"
 	"github.com/ameetmadan/arca/internal/sorter"
 	"github.com/ameetmadan/arca/internal/watcher"
+	"github.com/ameetmadan/arca/pkg/decision/rules"
 )
 
 type server struct {
@@ -24,6 +25,7 @@ type server struct {
 	mm     *modelmanager.Manager
 	sorter *sorter.Sorter
 	exec   *executor.Executor // nil when the journal could not be opened
+	rules  *rulesAPI          // /api/v1/rules; see rules_api.go
 }
 
 func main() {
@@ -54,6 +56,9 @@ func main() {
 			Parser: app.Parser,
 		},
 		exec: exec,
+		// The rules engine is wired in internal/config; once it exists, pass it
+		// here as the second argument so edits take effect without a restart.
+		rules: newRulesAPI(rules.NewFileStore(defaultRulesPath()), nil),
 	}
 
 	// File events flow watcher -> pipeline -> indexer in-process; the HTTP
