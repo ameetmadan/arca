@@ -28,6 +28,10 @@ type server struct {
 	rules  *rulesAPI          // /api/v1/rules; see rules_api.go
 
 	decisions *decisions.Service // nil when the queue database could not be opened
+
+	// recent remembers paths Arca just moved so the watcher does not decide
+	// on its own moves again; nil-safe.
+	recent *pipeline.RecentMoves
 }
 
 func main() {
@@ -48,8 +52,14 @@ func main() {
 	}
 	mm := modelmanager.New(modelsDir)
 
-	decSvc, closeDecisions := newDecisionService(filepath.Dir(defaultConfigPath()), app.Executor)
+	recent := pipeline.NewRecentMoves(pipeline.DefaultRecentMoveWindow)
+	var fileExec decisions.FileExecutor // stays a nil interface when there is no journal
+	if app.Executor != nil {
+		fileExec = recent.Wrap(app.Executor)
+	}
+	decSvc, closeDecisions := newDecisionService(filepath.Dir(defaultConfigPath()), fileExec)
 	srv := &server{
+		recent:    recent,
 		decisions: decSvc,
 		app:       app,
 		mm:        mm,
@@ -62,9 +72,9 @@ func main() {
 		rules: newRulesAPI(rulesStore(app), rulesReloader(app)),
 	}
 
-	// File events flow watcher -> pipeline -> indexer in-process; the HTTP
-	// endpoint POST /api/v1/index runs the same indexer.
-	events := pipeline.New(srv.indexer().Handle, pipeline.Options{Debounce: pipeline.DefaultDebounce})
+	// File events flow watcher -> pipeline -> indexer -> decider in-process;
+	// the HTTP endpoint POST /api/v1/index runs the same indexer.
+	events := pipeline.New(srv.eventHandler(), pipeline.Options{Debounce: pipeline.DefaultDebounce})
 	w, err := watcher.New(events.Submit)
 	if err != nil {
 		log.Fatalf("create watcher: %v", err)

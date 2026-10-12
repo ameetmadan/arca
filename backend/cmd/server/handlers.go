@@ -14,6 +14,7 @@ import (
 	"github.com/ameetmadan/arca/internal/executor"
 	"github.com/ameetmadan/arca/internal/modelmanager"
 	"github.com/ameetmadan/arca/internal/pipeline"
+	"github.com/ameetmadan/arca/internal/policy"
 	"github.com/ameetmadan/arca/internal/sorter"
 	"github.com/ameetmadan/arca/pkg/decision"
 )
@@ -69,25 +70,94 @@ func indexStatus(err error) int {
 	return http.StatusInternalServerError
 }
 
-// POST /api/sort — sort / categorise files in a folder
+// POST /api/sort — sort / categorise files in a folder.
+//
+// The response always carries "moves" ([{file, suggested_folder}]), which is
+// what the Swift client reads. With "submit": true in the request the same
+// suggestions are also sent through the decision queue as decisions with
+// source "cluster", and the response gains a "decisions" summary.
 func (s *server) handleSort(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Folder string `json:"folder"`
+		Submit bool   `json:"submit"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Folder == "" {
 		apiResponse(w, http.StatusBadRequest, nil, "folder required")
 		return
 	}
+	if req.Submit {
+		if s.decisions == nil {
+			apiResponse(w, http.StatusServiceUnavailable, nil, "decision queue unavailable")
+			return
+		}
+		if !filepath.IsAbs(req.Folder) {
+			apiResponse(w, http.StatusBadRequest, nil, "folder must be an absolute path")
+			return
+		}
+		req.Folder = filepath.Clean(req.Folder)
+	}
 
-	moves, err := s.sorter.Sort(r.Context(), req.Folder)
+	suggestions, err := s.sorter.Suggest(r.Context(), req.Folder)
 	if err != nil {
 		apiResponse(w, http.StatusInternalServerError, nil, err.Error())
 		return
 	}
-	if moves == nil {
-		moves = []sorter.SortMove{}
+	moves := make([]sorter.SortMove, 0, len(suggestions))
+	for _, sg := range suggestions {
+		moves = append(moves, sorter.SortMove{File: sg.File, SuggestedFolder: sg.Decision.Target})
 	}
-	apiResponse(w, http.StatusOK, map[string][]sorter.SortMove{"moves": moves}, "")
+	data := map[string]any{"moves": moves}
+	if req.Submit {
+		data["decisions"] = s.submitSuggestions(r.Context(), req.Folder, suggestions)
+	}
+	apiResponse(w, http.StatusOK, data, "")
+}
+
+// submitSummary reports what happened to a batch of submitted suggestions.
+type submitSummary struct {
+	Queued  int `json:"queued"`  // waiting for the user
+	Applied int `json:"applied"` // applied by the folder's policy
+	Dropped int `json:"dropped"` // the policy discarded them (folder is off)
+	// Skipped suggestions already had a pending decision.
+	Skipped int      `json:"skipped"`
+	Failed  int      `json:"failed"`
+	Errors  []string `json:"errors,omitempty"`
+}
+
+// submitSuggestions sends batch-sort suggestions through the same path as the
+// watcher's decisions: decisions.Service.Submit, so the folder's policy
+// decides whether each is dropped, queued or applied. Unlike the watcher it
+// does not apply backpressure: the user asked for this batch explicitly.
+func (s *server) submitSuggestions(ctx context.Context, root string, suggestions []sorter.Suggestion) submitSummary {
+	var sum submitSummary
+	for _, sg := range suggestions {
+		if ctx.Err() != nil {
+			break
+		}
+		if n, err := s.decisions.CountPending(ctx, root, sg.File); err == nil && n > 0 {
+			sum.Skipped++
+			continue
+		}
+		res, err := s.decisions.Submit(ctx, root, sg.File, sg.Decision)
+		if err != nil {
+			sum.Failed++
+			status, msg := classifyDecisionError(err, "")
+			if status == http.StatusInternalServerError {
+				log.Printf("sort: submit decision: %v", err)
+			}
+			sum.Errors = append(sum.Errors, fmt.Sprintf("%s: %s", sg.File, msg))
+			continue
+		}
+		switch res.Outcome {
+		case policy.ApplyNow:
+			sum.Applied++
+		case policy.Queue:
+			sum.Queued++
+		default:
+			sum.Dropped++
+		}
+	}
+	return sum
 }
 
 // POST /api/sort/apply — execute the moves returned by /api/sort
@@ -125,9 +195,10 @@ func (s *server) handleSortApply(w http.ResponseWriter, r *http.Request) {
 			Reason:     "applied from sort suggestion",
 			Source:     "user",
 		}
-		_, err := s.exec.Execute(r.Context(), req.Folder, d, m.File)
+		entry, err := s.exec.Execute(r.Context(), req.Folder, d, m.File)
 		switch {
 		case err == nil:
+			s.recent.Record(entry.Src, entry.Dst) // the watcher must not re-decide on this move
 			applied++
 		case errors.Is(err, executor.ErrInvalidRoot):
 			apiResponse(w, http.StatusBadRequest, nil, "folder is not an existing directory")
