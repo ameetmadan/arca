@@ -16,16 +16,16 @@ import (
 	"github.com/ameetmadan/arca/pkg/vector"
 )
 
-type fakeLLM struct{}
+type healthLLM struct{}
 
-func (fakeLLM) Generate(context.Context, string) (io.Reader, error) {
+func (healthLLM) Generate(context.Context, string) (io.Reader, error) {
 	return strings.NewReader(""), nil
 }
-func (fakeLLM) GenerateSync(context.Context, string) (string, error) { return "", nil }
+func (healthLLM) GenerateSync(context.Context, string) (string, error) { return "", nil }
 
-type fakeEmbed struct{}
+type healthEmbed struct{}
 
-func (fakeEmbed) Embed(context.Context, string) ([]float32, error) { return []float32{1}, nil }
+func (healthEmbed) Embed(context.Context, string) ([]float32, error) { return []float32{1}, nil }
 
 type fakeStore struct{ pingErr error }
 
@@ -51,8 +51,8 @@ func (fakeParser) Parse(string) ([]parser.Chunk, error) { return nil, nil }
 func healthyApp() *config.App {
 	return &config.App{
 		Cfg:           &config.File{},
-		LLMProvider:   fakeLLM{},
-		EmbedProvider: fakeEmbed{},
+		LLMProvider:   healthLLM{},
+		EmbedProvider: healthEmbed{},
 		VectorStore:   fakeStore{},
 		SQLEngine:     fakeSQL{},
 		Parser:        fakeParser{},
