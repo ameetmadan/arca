@@ -3,6 +3,7 @@ package main
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -38,11 +39,31 @@ func (s *server) routesWith(logger *slog.Logger, limiter *rateLimiter) http.Hand
 		s.apiRoutes(r)
 	})
 
+	// Deprecated: unversioned aliases kept for one release so an older Swift
+	// client keeps working. They share the v1 handlers and rate limiter.
+	// Remove once the bundled app only uses /api/v1.
+	r.Route("/api", func(r chi.Router) {
+		r.Use(limiter.middleware)
+		r.Use(deprecatedAlias)
+		s.apiRoutes(r)
+	})
+
 	return r
 }
 
-// apiRoutes registers the business endpoints on r. It is mounted once under
-// /api/v1.
+// deprecatedAlias marks responses from the legacy /api/* paths (RFC 9745
+// Deprecation header) and points at the /api/v1 successor (RFC 8288 Link).
+func deprecatedAlias(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Deprecation", "true")
+		successor := "/api/v1" + strings.TrimPrefix(r.URL.Path, "/api")
+		w.Header().Add("Link", "<"+successor+">; rel=\"successor-version\"")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// apiRoutes registers the business endpoints on r. It is mounted under
+// /api/v1 and, as a deprecated alias, under /api.
 func (s *server) apiRoutes(r chi.Router) {
 	r.Post("/index", s.handleIndex)
 	r.Post("/sort", s.handleSort)
