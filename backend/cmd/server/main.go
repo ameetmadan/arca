@@ -11,9 +11,6 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-
 	"github.com/ameetmadan/arca/internal/config"
 	"github.com/ameetmadan/arca/internal/modelmanager"
 	"github.com/ameetmadan/arca/internal/sorter"
@@ -44,7 +41,7 @@ func main() {
 	}
 	mm := modelmanager.New(modelsDir)
 
-	w, err := watcher.New(fmt.Sprintf("http://localhost:%d/api/index", app.Cfg.Server.Port))
+	w, err := watcher.New(fmt.Sprintf("http://localhost:%d/api/v1/index", app.Cfg.Server.Port))
 	if err != nil {
 		log.Fatalf("create watcher: %v", err)
 	}
@@ -68,19 +65,7 @@ func main() {
 		},
 	}
 
-	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(corsMiddleware)
-
-	r.Post("/api/index", srv.handleIndex)
-	r.Post("/api/sort", srv.handleSort)
-	r.Post("/api/sort/apply", srv.handleSortApply)
-	r.Get("/api/chat", srv.handleChat)
-	r.Post("/api/query", srv.handleQuery)
-	r.Get("/api/models", srv.handleModels)
-	r.Get("/api/models/download", srv.handleModelDownload)
-	r.Post("/api/models/activate", srv.handleModelActivate)
+	r := srv.routes() // see routes.go
 
 	addr := fmt.Sprintf("localhost:%d", app.Cfg.Server.Port)
 	httpSrv := &http.Server{Addr: addr, Handler: r}
