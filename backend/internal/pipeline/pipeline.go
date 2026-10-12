@@ -293,6 +293,11 @@ func (p *Pipeline) worker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case ev := <-p.work:
+			// select picks at random when both cases are ready, so a
+			// cancelled context must be rechecked before running queued work.
+			if ctx.Err() != nil {
+				return
+			}
 			p.process(ctx, ev)
 			select {
 			case p.done <- ev.Path:
