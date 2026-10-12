@@ -76,8 +76,8 @@ func TestDecideClearWinner(t *testing.T) {
 	if d.Action != decision.Move {
 		t.Errorf("Action = %q, want move", d.Action)
 	}
-	if d.Target != "/r/Taxes/2025" {
-		t.Errorf("Target = %q, want /r/Taxes/2025", d.Target)
+	if d.Target != "Taxes/2025" {
+		t.Errorf("Target = %q, want Taxes/2025", d.Target)
 	}
 	if d.Source != "semantic" {
 		t.Errorf("Source = %q, want semantic", d.Source)
@@ -135,8 +135,8 @@ func TestDecideTieBreakIsDeterministic(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if d.Target != "/r/A" {
-			t.Fatalf("Target = %q, want /r/A (first by path on a tie)", d.Target)
+		if d.Target != "A" {
+			t.Fatalf("Target = %q, want A (first by path on a tie)", d.Target)
 		}
 	}
 }
@@ -212,8 +212,8 @@ func TestDecideWithoutPathConsidersEveryRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Target != "/r/A" {
-		t.Errorf("Target = %q, want /r/A", d.Target)
+	if d.Target != "A" {
+		t.Errorf("Target = %q, want A", d.Target)
 	}
 }
 
@@ -227,8 +227,8 @@ func TestDecideSkipsFoldersWithMismatchedDimension(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Target != "/r/A" {
-		t.Errorf("Target = %q, want /r/A", d.Target)
+	if d.Target != "A" {
+		t.Errorf("Target = %q, want A", d.Target)
 	}
 }
 
@@ -246,8 +246,8 @@ func TestDecideKNNStrategy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Target != "/r/Tidy" {
-		t.Errorf("centroid strategy: Target = %q, want /r/Tidy", d.Target)
+	if d.Target != "Tidy" {
+		t.Errorf("centroid strategy: Target = %q, want Tidy", d.Target)
 	}
 
 	knn := DefaultTunables()
@@ -258,8 +258,8 @@ func TestDecideKNNStrategy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Target != "/r/Mixed" {
-		t.Errorf("knn strategy: Target = %q, want /r/Mixed", d.Target)
+	if d.Target != "Mixed" {
+		t.Errorf("knn strategy: Target = %q, want Mixed", d.Target)
 	}
 }
 
@@ -293,8 +293,8 @@ func TestDecideKNNFallsBackToCentroidWithoutExamples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Target != "/r/A" {
-		t.Errorf("Target = %q, want /r/A", d.Target)
+	if d.Target != "A" {
+		t.Errorf("Target = %q, want A", d.Target)
 	}
 }
 

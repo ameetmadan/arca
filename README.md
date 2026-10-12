@@ -167,9 +167,29 @@ Notes:
   makes startup fail.
 - When you activate a model through the app, the backend rewrites `config.yaml` with the new model
   paths. Comments in the file are not preserved when that happens.
-- The decision engine proposed in [ADR-0006](docs/adr/0006-decision-engine-chain-with-policy-and-executor.md)
-  will add a `decision:` section. It does not exist yet, so it is not documented here. This README
-  will be updated when it lands.
+
+### Decision engines (optional)
+
+The `decision:` section ([ADR-0006](docs/adr/0006-decision-engine-chain-with-policy-and-executor.md))
+lists the engines that decide what to do with a file, in order. The first engine whose answer
+reaches its `min_confidence` wins; if none does, the file is left for the user to decide. Leave the
+section out and you get the default below.
+
+```yaml
+decision:
+  engines:
+    - {type: rules,    min_confidence: 1.0}   # your own rules; rules_path defaults to <app dir>/rules.yaml
+    - {type: semantic, min_confidence: 0.7}   # the folder it most resembles, learned from your existing folders
+    - {type: llm,      min_confidence: 0.5}   # the local LLM picks from your existing folders
+```
+
+- `type` is `rules`, `semantic` or `llm`, each at most once. An unknown type, a `min_confidence`
+  outside 0 to 1, or an engine whose provider is missing makes startup fail with a message naming
+  the entry.
+- `min_confidence` may be omitted; the values shown are the defaults.
+- `rules_path` (rules only) points at the rules file. A missing file just means no rules.
+- The semantic engine learns from the sub-folders of `watcher.folders` in the background after
+  each start, so it has nothing to go on until that has finished.
 
 ## Tests
 
