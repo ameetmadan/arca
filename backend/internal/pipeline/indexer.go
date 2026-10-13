@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/ameetmadan/arca/pkg/embed"
 	"github.com/ameetmadan/arca/pkg/parser"
@@ -19,6 +20,9 @@ const (
 	StageParse  Stage = "parse"
 	StageEmbed  Stage = "embed"
 	StageUpsert Stage = "upsert"
+	// StageCleanup removes chunks left over from an earlier, longer version
+	// of the file.
+	StageCleanup Stage = "cleanup"
 )
 
 // IndexError reports which stage of indexing failed. Its message matches what
@@ -50,11 +54,26 @@ type Indexer struct {
 }
 
 // ChunkID is the vector-store id of chunk i of the file at path.
-func ChunkID(path string, i int) string { return fmt.Sprintf("%s#%d", path, i) }
+func ChunkID(path string, i int) string { return chunkPrefix(path) + strconv.Itoa(i) }
+
+// chunkPrefix is what every ChunkID of the file at path starts with.
+func chunkPrefix(path string) string { return path + "#" }
+
+// deleteChunks removes chunks from..end of the file at path, if the store can.
+// A store without vector.ChunkDeleter keeps its stale chunks, as before.
+func (ix *Indexer) deleteChunks(ctx context.Context, path string, from int) error {
+	d, ok := ix.Store.(vector.ChunkDeleter)
+	if !ok {
+		return nil
+	}
+	return d.DeleteChunks(ctx, chunkPrefix(path), from)
+}
 
 // IndexFile parses the file at path, embeds each chunk and upserts it. It
 // returns the number of chunks indexed. Failures are *IndexError values.
-// Chunks upserted before a failure stay in the store.
+// Chunks upserted before a failure stay in the store. Once every chunk is
+// in, chunks beyond the last one from an earlier, longer version of the file
+// are removed.
 func (ix *Indexer) IndexFile(ctx context.Context, path string) (int, error) {
 	chunks, err := ix.Parser.Parse(path)
 	if err != nil {
@@ -73,18 +92,26 @@ func (ix *Indexer) IndexFile(ctx context.Context, path string) (int, error) {
 			return i, &IndexError{Stage: StageUpsert, Chunk: i, Err: err}
 		}
 	}
+	if err := ix.deleteChunks(ctx, path, len(chunks)); err != nil {
+		return len(chunks), &IndexError{Stage: StageCleanup, Chunk: len(chunks), Err: err}
+	}
 	return len(chunks), nil
 }
 
 // Handle is the pipeline Handler that keeps the index up to date.
 //
 // Created and Modified events index the file; directories are skipped.
-// Removed events are currently ignored: chunk ids are "<path>#<n>" and the
-// VectorStore cannot list or delete by prefix, so stale chunks of a deleted
-// file stay in the index until the store grows that capability.
+// Removed events (which the watcher also sends for the old name of a renamed
+// file; the new name arrives as Created) delete the file's chunks, so deleted
+// and moved files stop appearing in answers. That needs a store implementing
+// vector.ChunkDeleter; chunks of removed directories' contents are not found
+// this way.
 func (ix *Indexer) Handle(ctx context.Context, ev Event) error {
 	if ev.Op == Removed {
-		return nil
+		if _, err := os.Stat(ev.Path); err == nil {
+			return nil // recreated since; its Created event reindexes it
+		}
+		return ix.deleteChunks(ctx, ev.Path, 0)
 	}
 	if info, err := os.Stat(ev.Path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
