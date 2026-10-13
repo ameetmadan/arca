@@ -23,8 +23,8 @@ The models the backend can download (see `backend/internal/modelmanager/modelman
 | `qwen25-3b` | Qwen 2.5 3B Instruct (Q4_K_M) | 1.9 GB |
 | `nomic-embed` | Nomic Embed Text v1.5 (Q4_K_M), used for embeddings | 0.08 GB |
 
-> `modelmanager` supports SHA256 verification, but the hashes in the model list are currently
-> empty, so downloads are not yet checked against a hash.
+> Model URLs are pinned to a Hugging Face commit and every download is verified against a SHA256;
+> a mismatch (or a model with no hash) fails the download and removes the partial file.
 
 ## Documentation
 
