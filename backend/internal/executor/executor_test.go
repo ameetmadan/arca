@@ -458,3 +458,92 @@ func TestExecute_JournalFailureRollsBackMove(t *testing.T) {
 		t.Fatal("dst remains")
 	}
 }
+
+// swapForSymlink replaces the directory dir with a symlink to target, as
+// another process could between the Executor's checks and its file operations.
+func swapForSymlink(t *testing.T, dir, target string) {
+	t.Helper()
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func dirEntries(t *testing.T, dir string) int {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(entries)
+}
+
+// The target folder passes the containment check, then is replaced by a
+// symlink to a folder outside the root before the move happens.
+func TestExecute_TargetDirSwappedForOutsideSymlinkMidOperation(t *testing.T) {
+	ex, j, root, parent := setup(t)
+	outside := filepath.Join(parent, "outside")
+	if err := os.Mkdir(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(root, "a.txt"), "secret")
+	ex.beforeMove = func() { swapForSymlink(t, filepath.Join(root, "Docs"), outside) }
+
+	_, err := ex.Execute(context.Background(), root, mv("Docs"), "a.txt")
+	if !errors.Is(err, ErrOutsideRoot) {
+		t.Fatalf("err = %v, want ErrOutsideRoot", err)
+	}
+	if n := dirEntries(t, outside); n != 0 {
+		t.Fatalf("%d entries appeared outside the root", n)
+	}
+	if got := read(t, filepath.Join(root, "a.txt")); got != "secret" {
+		t.Fatalf("source changed: %q", got)
+	}
+	if len(j.entries) != 0 {
+		t.Fatalf("journal has %d entries for a move that did not happen", len(j.entries))
+	}
+}
+
+// The folder holding the source is replaced by a symlink to a folder outside
+// the root that has a file of the same name: the outside file must not move.
+func TestExecute_SourceDirSwappedForOutsideSymlinkMidOperation(t *testing.T) {
+	ex, _, root, parent := setup(t)
+	outside := filepath.Join(parent, "outside")
+	write(t, filepath.Join(outside, "a.txt"), "not yours")
+	write(t, filepath.Join(root, "sub", "a.txt"), "mine")
+	ex.beforeMove = func() { swapForSymlink(t, filepath.Join(root, "sub"), outside) }
+
+	_, err := ex.Execute(context.Background(), root, mv("Docs"), "sub/a.txt")
+	if err == nil {
+		t.Fatal("Execute succeeded although its source directory was swapped for an outside symlink")
+	}
+	if got := read(t, filepath.Join(outside, "a.txt")); got != "not yours" {
+		t.Fatalf("file outside the root was touched: %q", got)
+	}
+}
+
+// Undo re-verifies the journal entry, then the folder the file sits in is
+// replaced by a symlink to a folder outside the root.
+func TestUndo_DestinationDirSwappedForOutsideSymlinkMidOperation(t *testing.T) {
+	ex, _, root, parent := setup(t)
+	outside := filepath.Join(parent, "outside")
+	write(t, filepath.Join(outside, "a.txt"), "not yours")
+	write(t, filepath.Join(root, "a.txt"), "mine")
+	entry, err := ex.Execute(context.Background(), root, mv("Docs"), "a.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex.beforeMove = func() { swapForSymlink(t, filepath.Join(root, "Docs"), outside) }
+
+	if err := ex.Undo(context.Background(), entry.ID); err == nil {
+		t.Fatal("Undo succeeded although the moved file's folder was swapped for an outside symlink")
+	}
+	if got := read(t, filepath.Join(outside, "a.txt")); got != "not yours" {
+		t.Fatalf("file outside the root was touched: %q", got)
+	}
+	if exists(filepath.Join(root, "a.txt")) {
+		t.Fatal("a file was moved into the root from outside it")
+	}
+}
