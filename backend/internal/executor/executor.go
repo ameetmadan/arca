@@ -5,6 +5,16 @@
 // existing file, and is recorded in a Journal so it can be undone. See
 // docs/adr/0006-decision-engine-chain-with-policy-and-executor.md.
 //
+// The checks give early, descriptive errors, but they are not what keeps files
+// inside the root: another process could swap a directory for a symlink
+// between a check and the move. So the moves themselves, and the directory
+// creation, go through an [os.Root] opened on the root folder, which refuses
+// to follow any path out of it at the moment of the operation. An os.Root
+// cannot rename across roots; that is fine here because a move always stays
+// inside one root, and no copy-and-delete fallback is attempted when the
+// rename itself fails (for example when a bind mount inside the root makes it
+// cross devices): the error is returned and nothing changes.
+//
 // The package never reads or logs file contents; only paths are handled.
 package executor
 
@@ -57,6 +67,11 @@ type Executor struct {
 	now     func() time.Time
 
 	mu sync.Mutex
+
+	// beforeMove, if set, runs after the paths were checked and before the
+	// first file system change. Tests use it to simulate another process
+	// racing the Executor.
+	beforeMove func()
 }
 
 // New returns an Executor that records actions in j.
@@ -104,17 +119,26 @@ func (e *Executor) Execute(ctx context.Context, root string, d decision.Decision
 		return JournalEntry{}, err
 	}
 
-	dstDir, err := prepareTargetDir(rootReal, d.Target)
+	rfs, err := os.OpenRoot(rootReal)
+	if err != nil {
+		return JournalEntry{}, fmt.Errorf("%w: %v", ErrInvalidRoot, err)
+	}
+	defer rfs.Close()
+
+	dstDir, err := prepareTargetDir(rfs, rootReal, d.Target)
 	if err != nil {
 		return JournalEntry{}, err
 	}
 	if dstDir == filepath.Dir(src) {
 		return JournalEntry{}, ErrAlreadyInPlace
 	}
+	if e.beforeMove != nil {
+		e.beforeMove()
+	}
 
-	dst, err := moveWithoutClobber(src, dstDir, filepath.Base(src))
+	dst, err := moveWithoutClobber(rfs, rootReal, src, dstDir, filepath.Base(src))
 	if err != nil {
-		return JournalEntry{}, err
+		return JournalEntry{}, mapRootError(err)
 	}
 
 	entry, err := e.journal.Append(ctx, JournalEntry{
@@ -128,7 +152,7 @@ func (e *Executor) Execute(ctx context.Context, root string, d decision.Decision
 	})
 	if err != nil {
 		// An unjournalled move cannot be undone, so put the file back.
-		if rbErr := moveExact(dst, src); rbErr != nil {
+		if rbErr := moveExact(rfs, rootReal, dst, src); rbErr != nil {
 			return JournalEntry{}, fmt.Errorf("journal append failed and rollback failed (file is at %s): %w", dst, errors.Join(err, rbErr))
 		}
 		return JournalEntry{}, fmt.Errorf("journal append: %w", err)
@@ -172,26 +196,44 @@ func (e *Executor) Undo(ctx context.Context, id int64) error {
 		return err
 	}
 
-	if _, err := os.Lstat(dst); err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return ErrUndoDestinationMissing
-		}
+	rfs, err := os.OpenRoot(rootReal)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidRoot, err)
+	}
+	defer rfs.Close()
+	srcRel, err := relInside(rootReal, src)
+	if err != nil {
 		return err
 	}
-	if _, err := os.Lstat(src); err == nil {
-		return ErrUndoSourceOccupied
-	} else if !errors.Is(err, fs.ErrNotExist) {
+	dstRel, err := relInside(rootReal, dst)
+	if err != nil {
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(src), 0o755); err != nil {
-		return err
+	if e.beforeMove != nil {
+		e.beforeMove()
 	}
-	if err := moveExact(dst, src); err != nil {
+
+	if _, err := rfs.Lstat(dstRel); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return ErrUndoDestinationMissing
+		}
+		return mapRootError(err)
+	}
+	if _, err := rfs.Lstat(srcRel); err == nil {
+		return ErrUndoSourceOccupied
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return mapRootError(err)
+	}
+
+	if err := rfs.MkdirAll(filepath.Dir(srcRel), 0o755); err != nil {
+		return mapRootError(err)
+	}
+	if err := moveExact(rfs, rootReal, dst, src); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return ErrUndoSourceOccupied
 		}
-		return err
+		return mapRootError(err)
 	}
 	if err := e.journal.MarkUndone(ctx, id, e.now()); err != nil {
 		return fmt.Errorf("file restored but journal update failed: %w", err)
@@ -288,9 +330,28 @@ func resolveSource(rootReal, file string) (string, error) {
 	return src, nil
 }
 
+// relInside returns p, an absolute path inside rootReal, relative to it, which
+// is the form an [os.Root] takes. "." means the root itself.
+func relInside(rootReal, p string) (string, error) {
+	if !within(rootReal, p) {
+		return "", ErrOutsideRoot
+	}
+	return filepath.Rel(rootReal, p)
+}
+
+// mapRootError turns the error an [os.Root] gives for a path that leaves the
+// root into ErrOutsideRoot, so callers see one error for "escapes the root"
+// whether it was caught by the early checks or at the moment of the operation.
+func mapRootError(err error) error {
+	if err != nil && strings.Contains(err.Error(), "path escapes from parent") {
+		return fmt.Errorf("%w: %v", ErrOutsideRoot, err)
+	}
+	return err
+}
+
 // prepareTargetDir validates target (relative to rootReal), creates the
 // directory if needed and returns its real absolute path.
-func prepareTargetDir(rootReal, target string) (string, error) {
+func prepareTargetDir(rfs *os.Root, rootReal, target string) (string, error) {
 	lexical := filepath.Join(rootReal, target)
 	if !within(rootReal, lexical) {
 		return "", fmt.Errorf("%w: target %q", ErrOutsideRoot, target)
@@ -300,8 +361,12 @@ func prepareTargetDir(rootReal, target string) (string, error) {
 	if _, err := resolveInside(rootReal, lexical); err != nil {
 		return "", fmt.Errorf("target %q: %w", target, err)
 	}
-	if err := os.MkdirAll(lexical, 0o755); err != nil {
-		return "", fmt.Errorf("create target folder: %w", err)
+	rel, err := relInside(rootReal, lexical)
+	if err != nil {
+		return "", fmt.Errorf("target %q: %w", target, err)
+	}
+	if err := rfs.MkdirAll(rel, 0o755); err != nil {
+		return "", fmt.Errorf("create target folder: %w", mapRootError(err))
 	}
 	real, err := resolveInside(rootReal, lexical)
 	if err != nil {
@@ -314,7 +379,7 @@ func prepareTargetDir(rootReal, target string) (string, error) {
 // when that name is taken, and returns the final path. The destination name is
 // claimed with O_EXCL before renaming, so a file that appears concurrently is
 // never replaced.
-func moveWithoutClobber(src, dir, name string) (string, error) {
+func moveWithoutClobber(rfs *os.Root, rootReal, src, dir, name string) (string, error) {
 	ext := filepath.Ext(name)
 	stem := strings.TrimSuffix(name, ext)
 	if stem == "" { // dotfile such as ".env": treat the whole name as the stem
@@ -326,7 +391,7 @@ func moveWithoutClobber(src, dir, name string) (string, error) {
 			candidate = fmt.Sprintf("%s (%d)%s", stem, i, ext)
 		}
 		dst := filepath.Join(dir, candidate)
-		err := moveExact(src, dst)
+		err := moveExact(rfs, rootReal, src, dst)
 		if errors.Is(err, fs.ErrExist) {
 			continue
 		}
@@ -338,20 +403,30 @@ func moveWithoutClobber(src, dir, name string) (string, error) {
 	return "", fmt.Errorf("no free name for %q after %d attempts", name, maxCollisionAttempts)
 }
 
-// moveExact renames src to dst, failing with fs.ErrExist instead of replacing
-// an existing dst. os.Rename alone would silently overwrite on POSIX, so dst
-// is first claimed with an exclusive create.
-func moveExact(src, dst string) error {
-	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+// moveExact renames src to dst (absolute paths inside rootReal), failing with
+// fs.ErrExist instead of replacing an existing dst. Rename alone would
+// silently overwrite on POSIX, so dst is first claimed with an exclusive
+// create. Both steps go through rfs, so neither can leave the root even if a
+// directory on the way is swapped for a symlink in the meantime.
+func moveExact(rfs *os.Root, rootReal, src, dst string) error {
+	srcRel, err := relInside(rootReal, src)
+	if err != nil {
+		return err
+	}
+	dstRel, err := relInside(rootReal, dst)
+	if err != nil {
+		return err
+	}
+	f, err := rfs.OpenFile(dstRel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(dst) //nolint:errcheck
+		rfs.Remove(dstRel) //nolint:errcheck
 		return err
 	}
-	if err := os.Rename(src, dst); err != nil {
-		os.Remove(dst) //nolint:errcheck
+	if err := rfs.Rename(srcRel, dstRel); err != nil {
+		rfs.Remove(dstRel) //nolint:errcheck
 		return err
 	}
 	return nil
