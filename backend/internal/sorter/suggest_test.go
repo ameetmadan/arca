@@ -2,6 +2,7 @@ package sorter
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -93,5 +94,31 @@ func TestSort_StillReturnsRawMoves(t *testing.T) {
 		if m.File == "" || m.SuggestedFolder == "" {
 			t.Errorf("incomplete move %+v", m)
 		}
+	}
+}
+
+// Files already in a sub-folder count as sorted, and hidden files are never
+// moved: only loose files directly in the folder are suggested.
+func TestSuggest_OnlyLooseTopLevelFiles(t *testing.T) {
+	s, dir := twoClusterSorter(t)
+	mp := s.Parser.(*mockParser)
+	if err := os.Mkdir(filepath.Join(dir, "Archive"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{filepath.Join("Archive", "old-invoice.txt"), ".hidden-invoice.txt"} {
+		p := writeFile(t, dir, name, "invoice payment due amount")
+		mp.chunks[p] = []parser.Chunk{{Content: "invoice payment due amount"}}
+	}
+	got, err := s.Suggest(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sg := range got {
+		if strings.Contains(sg.File, "Archive") || strings.HasPrefix(sg.File, ".") {
+			t.Fatalf("suggested moving %s", sg.File)
+		}
+	}
+	if len(got) != 4 {
+		t.Fatalf("got %d suggestions, want 4", len(got))
 	}
 }
