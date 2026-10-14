@@ -331,3 +331,22 @@ func TestIndexer_CleanupFailureIsReported(t *testing.T) {
 		t.Fatalf("err = %v, want IndexError at stage %s", err, StageCleanup)
 	}
 }
+
+// Chat answers from the text stored with each vector, so the chunk text must
+// be stored alongside the parser's metadata (regression: it was not).
+func TestIndexer_StoresChunkTextAndSource(t *testing.T) {
+	path := touch(t, "notes.txt")
+	store := &fakeStore{}
+	ix := &Indexer{
+		Parser: &fakeParser{chunks: []parser.Chunk{{Content: "the answer is 42", Metadata: map[string]interface{}{"page": 3}}}},
+		Embed:  &fakeEmbed{},
+		Store:  store,
+	}
+	if _, err := ix.IndexFile(context.Background(), path); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]interface{}{"page": 3, MetaContent: "the answer is 42", MetaSource: path}
+	if !reflect.DeepEqual(store.meta[0], want) {
+		t.Fatalf("metadata = %v, want %v", store.meta[0], want)
+	}
+}
