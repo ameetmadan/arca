@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Model describes a downloadable .gguf model.
@@ -31,27 +32,30 @@ type ProgressEvent struct {
 	Error      string  `json:"error,omitempty"`
 }
 
+// AvailableModels pins every URL to a Hugging Face commit (never "main") and
+// carries the SHA256 of the file at that commit; downloads are rejected on
+// mismatch. To bump a model, update the revision and hash together.
 var AvailableModels = []Model{
 	{
 		ID:     "llama32-3b",
 		Name:   "Llama 3.2 3B Instruct",
-		URL:    "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-		SHA256: "",
+		URL:    "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/5ab33fa94d1d04e903623ae72c95d1696f09f9e8/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+		SHA256: "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff",
 		SizeGB: 2.0,
 	},
 	{
 		ID:     "qwen25-3b",
 		Name:   "Qwen 2.5 3B Instruct",
-		URL:    "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
-		SHA256: "",
+		URL:    "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/7dabda4d13d513e3e842b20f0d435c732f172cbe/qwen2.5-3b-instruct-q4_k_m.gguf",
+		SHA256: "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d",
 		SizeGB: 1.9,
 	},
 	// Embedding model — downloaded automatically alongside any LLM choice.
 	{
 		ID:     "nomic-embed",
 		Name:   "Nomic Embed Text v1.5 (embeddings)",
-		URL:    "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q4_K_M.gguf",
-		SHA256: "",
+		URL:    "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/0188c9bf409793f810680a5a431e7b899c46104c/nomic-embed-text-v1.5.Q4_K_M.gguf",
+		SHA256: "d4e388894e09cf3816e8b0896d81d265b55e7a9fff9ab03fe8bf4ef5e11295ac",
 		SizeGB: 0.08,
 	},
 }
@@ -96,6 +100,9 @@ func (m *Manager) Download(ctx context.Context, modelID string) (<-chan Progress
 	}
 	if target == nil {
 		return nil, fmt.Errorf("modelmanager: unknown model %q", modelID)
+	}
+	if target.SHA256 == "" {
+		return nil, fmt.Errorf("modelmanager: model %q has no SHA256; refusing unverified download", modelID)
 	}
 
 	if err := os.MkdirAll(m.Dir, 0o755); err != nil {
@@ -158,11 +165,8 @@ func (m *Manager) downloadFile(ctx context.Context, model *Model, dest string, c
 	}
 	f.Close()
 
-	if model.SHA256 != "" {
-		got := hex.EncodeToString(h.Sum(nil))
-		if got != model.SHA256 {
-			return fmt.Errorf("modelmanager: sha256 mismatch: got %s want %s", got, model.SHA256)
-		}
+	if got := hex.EncodeToString(h.Sum(nil)); !strings.EqualFold(got, model.SHA256) {
+		return fmt.Errorf("modelmanager: sha256 mismatch: got %s want %s", got, model.SHA256)
 	}
 
 	if err := os.Rename(tmp, dest); err != nil {
