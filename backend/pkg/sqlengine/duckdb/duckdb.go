@@ -25,3 +25,15 @@ func New(dbPath string, llmProvider llm.LLMProvider) (*DuckDBEngine, error) {
 func (e *DuckDBEngine) QueryNL(_ context.Context, _, _ string) (sqlengine.QueryResult, error) {
 	return sqlengine.QueryResult{}, ErrNotBuilt
 }
+
+func (e *DuckDBEngine) ImportFile(_ context.Context, _ string) ([]sqlengine.Table, error) {
+	return nil, ErrNotBuilt
+}
+
+func (e *DuckDBEngine) Tables(_ context.Context) ([]sqlengine.Table, error) {
+	return nil, ErrNotBuilt
+}
+
+func (e *DuckDBEngine) DropTable(_ context.Context, _ string) error {
+	return ErrNotBuilt
+}
