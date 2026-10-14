@@ -22,7 +22,9 @@ func (fakeVectors) Upsert(context.Context, string, []float32, map[string]interfa
 	return nil
 }
 func (fakeVectors) Search(context.Context, []float32, int) ([]vector.SearchResult, error) {
-	return nil, nil
+	return []vector.SearchResult{{ID: "/docs/a.txt#0", Metadata: map[string]interface{}{
+		"content": "an excerpt", "source": "/docs/a.txt",
+	}}}, nil
 }
 func (fakeVectors) Delete(context.Context, string) error { return nil }
 
