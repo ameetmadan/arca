@@ -16,6 +16,7 @@ import (
 	llmengine "github.com/ameetmadan/arca/pkg/decision/llm"
 	"github.com/ameetmadan/arca/pkg/decision/rules"
 	"github.com/ameetmadan/arca/pkg/decision/semantic"
+	"github.com/ameetmadan/arca/pkg/decision/semantic/sqlitestore"
 	"github.com/ameetmadan/arca/pkg/embed"
 	"github.com/ameetmadan/arca/pkg/llm"
 	"github.com/ameetmadan/arca/pkg/parser"
@@ -89,17 +90,28 @@ type decisionWiring struct {
 	// Workers are background jobs to run for the lifetime of the server, such
 	// as the semantic engine's folder indexer. Each returns when ctx is cancelled.
 	Workers []func(ctx context.Context)
+	// Closers release resources the wiring opened, such as the semantic
+	// folder index. The App runs them on Close.
+	Closers []func()
 }
 
 // wireDecision builds the decision chain from cfg.Decision. This is the only
 // place decision engines are constructed (ADR-0004).
-func wireDecision(cfg *File, deps decisionDeps) (*decisionWiring, error) {
+func wireDecision(cfg *File, deps decisionDeps) (_ *decisionWiring, err error) {
 	engines := cfg.Decision.Engines
 	if len(engines) == 0 {
 		engines = []EngineConfig{{Type: engineRules}, {Type: engineSemantic}, {Type: engineLLM}}
 	}
 
 	w := &decisionWiring{}
+	defer func() {
+		// Don't leak what an engine opened if a later one fails to wire.
+		if err != nil {
+			for i := len(w.Closers) - 1; i >= 0; i-- {
+				w.Closers[i]()
+			}
+		}
+	}()
 	seen := make(map[string]bool, len(engines))
 	for i, ec := range engines {
 		at := fmt.Sprintf("config: decision.engines[%d]", i)
@@ -178,7 +190,7 @@ func wireSemantic(w *decisionWiring, cfg *File, deps decisionDeps) (decision.Eng
 	if deps.Embed == nil {
 		return nil, errors.New(`engine "semantic" needs an embedding provider, but none is configured`)
 	}
-	store := semantic.NewMemoryStore()
+	store := openFolderStore(w, deps.AppDir)
 	t := semantic.DefaultTunables()
 	eng, err := semantic.NewEngine(store, t)
 	if err != nil {
@@ -191,8 +203,9 @@ func wireSemantic(w *decisionWiring, cfg *File, deps decisionDeps) (decision.Eng
 
 	roots := watchedRoots(cfg)
 	w.Workers = append(w.Workers, func(ctx context.Context) {
-		// The index lives in memory, so it is rebuilt after every start. The
-		// engine reads whatever is stored so far and never waits for this.
+		// Folders whose fingerprint is unchanged since the last run are
+		// skipped, so with a persistent store this is cheap after a restart.
+		// The engine reads whatever is stored so far and never waits for this.
 		for _, root := range roots {
 			err := idx.IndexRoot(ctx, root, nil)
 			if ctx.Err() != nil {
@@ -209,6 +222,30 @@ func wireSemantic(w *decisionWiring, cfg *File, deps decisionDeps) (decision.Eng
 		}
 	})
 	return eng, nil
+}
+
+// folderIndexFile is the semantic folder index's file name inside the Arca app dir.
+const folderIndexFile = "semantic.db"
+
+// openFolderStore returns the semantic engine's folder store. It prefers a
+// SQLite file in dir so the index survives restarts, and falls back to memory
+// (rebuilt in the background on every start) if dir is unset or SQLite is
+// unavailable, for example in a build without CGo.
+func openFolderStore(w *decisionWiring, dir string) semantic.FolderStore {
+	if dir == "" {
+		return semantic.NewMemoryStore()
+	}
+	s, err := sqlitestore.Open(filepath.Join(dir, folderIndexFile))
+	if err != nil {
+		log.Printf("decision: semantic folder index is in-memory only: %v", err)
+		return semantic.NewMemoryStore()
+	}
+	w.Closers = append(w.Closers, func() {
+		if err := s.Close(); err != nil {
+			log.Printf("decision: close semantic folder index: %v", err)
+		}
+	})
+	return s
 }
 
 func wireLLMEngine(cfg *File, deps decisionDeps) (decision.Engine, error) {
