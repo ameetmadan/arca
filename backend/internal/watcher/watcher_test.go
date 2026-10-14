@@ -119,7 +119,7 @@ func TestOpFor(t *testing.T) {
 		{fsnotify.Create | fsnotify.Write, pipeline.Created, true},
 		{fsnotify.Write | fsnotify.Remove, pipeline.Removed, true},
 		{fsnotify.Chmod, 0, false},
-		{fsnotify.Rename, 0, false},
+		{fsnotify.Rename, pipeline.Removed, true},
 	}
 	for _, c := range cases {
 		got, ok := opFor(fsnotify.Event{Name: "x", Op: c.in})

@@ -69,11 +69,12 @@ func (w *Watcher) Run(ctx context.Context) {
 }
 
 // opFor maps an fsnotify event to a pipeline op. When several bits are set the
-// most final one wins: Remove, then Create, then Write. Chmod and Rename are
-// not relevant.
+// most final one wins: Remove, then Create, then Write. Rename is reported for
+// the old name only (the new name arrives as Create), so it counts as a
+// removal. Chmod is not relevant.
 func opFor(e fsnotify.Event) (pipeline.Op, bool) {
 	switch {
-	case e.Has(fsnotify.Remove):
+	case e.Has(fsnotify.Remove), e.Has(fsnotify.Rename):
 		return pipeline.Removed, true
 	case e.Has(fsnotify.Create):
 		return pipeline.Created, true

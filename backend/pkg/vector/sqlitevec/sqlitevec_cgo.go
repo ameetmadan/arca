@@ -189,6 +189,48 @@ func (s *SQLiteVecStore) Delete(_ context.Context, id string) error {
 	return tx.Commit()
 }
 
+var _ vector.ChunkDeleter = (*SQLiteVecStore)(nil)
+
+// DeleteChunks implements vector.ChunkDeleter.
+//
+// The prefix is matched with instr(), not LIKE, so "%" and "_" in file paths
+// are not wildcards. What follows the prefix must be all digits, so the chunks
+// of "/a/b" never match those of a file called "/a/b#1".
+func (s *SQLiteVecStore) DeleteChunks(ctx context.Context, prefix string, from int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Names the rows to delete; vec_store has no id column, only rowids.
+	const match = `FROM vec_meta WHERE instr(id, ?1) = 1
+		AND substr(id, length(?1) + 1) != ''
+		AND substr(id, length(?1) + 1) NOT GLOB '*[^0-9]*'
+		AND CAST(substr(id, length(?1) + 1) AS INTEGER) >= ?2`
+
+	// vec_store only exists once an embedding has fixed the dimension. s.dim
+	// is not enough to tell: it is zero again after a restart.
+	var n int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE name = 'vec_store'`).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM vec_store WHERE rowid IN (SELECT rowid `+match+`)`,
+			prefix, from); err != nil {
+			return fmt.Errorf("sqlitevec: delete chunk vectors: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE `+match, prefix, from); err != nil {
+		return fmt.Errorf("sqlitevec: delete chunk metadata: %w", err)
+	}
+	return tx.Commit()
+}
+
 // Ping reports whether the underlying database connection is usable.
 func (s *SQLiteVecStore) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
