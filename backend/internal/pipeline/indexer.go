@@ -88,7 +88,7 @@ func (ix *Indexer) IndexFile(ctx context.Context, path string) (int, error) {
 		if err != nil {
 			return i, &IndexError{Stage: StageEmbed, Chunk: i, Err: err}
 		}
-		if err := ix.Store.Upsert(ctx, ChunkID(path, i), vec, chunk.Metadata); err != nil {
+		if err := ix.Store.Upsert(ctx, ChunkID(path, i), vec, chunkMetadata(path, chunk)); err != nil {
 			return i, &IndexError{Stage: StageUpsert, Chunk: i, Err: err}
 		}
 	}
@@ -97,6 +97,33 @@ func (ix *Indexer) IndexFile(ctx context.Context, path string) (int, error) {
 	}
 	return len(chunks), nil
 }
+
+// Forget removes every chunk of the file at path from the store, whether or
+// not the file still exists (e.g. its folder is no longer watched).
+func (ix *Indexer) Forget(ctx context.Context, path string) error {
+	return ix.deleteChunks(ctx, path, 0)
+}
+
+// chunkMetadata is what the store keeps next to a chunk's vector: the
+// parser's metadata plus the chunk text, which chat needs to quote the
+// passage back to the model, and the file path under "source".
+func chunkMetadata(path string, chunk parser.Chunk) map[string]interface{} {
+	meta := make(map[string]interface{}, len(chunk.Metadata)+2)
+	for k, v := range chunk.Metadata {
+		meta[k] = v
+	}
+	meta[MetaContent] = chunk.Content
+	if _, ok := meta[MetaSource]; !ok {
+		meta[MetaSource] = path
+	}
+	return meta
+}
+
+// Metadata keys every indexed chunk carries.
+const (
+	MetaContent = "content"
+	MetaSource  = "source"
+)
 
 // Handle is the pipeline Handler that keeps the index up to date.
 //
