@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -17,6 +18,8 @@ import (
 	"github.com/ameetmadan/arca/internal/policy"
 	"github.com/ameetmadan/arca/internal/sorter"
 	"github.com/ameetmadan/arca/pkg/decision"
+	"github.com/ameetmadan/arca/pkg/sqlengine"
+	"github.com/ameetmadan/arca/pkg/vector"
 )
 
 // modelPathUpdater is implemented by LlamaCppProvider (both CGo and stub).
@@ -220,9 +223,28 @@ func (s *server) handleSortApply(w http.ResponseWriter, r *http.Request) {
 	apiResponse(w, http.StatusOK, result, "")
 }
 
-// GET /api/chat — SSE streaming chat over indexed documents
+// Chat retrieval limits. The context budget keeps prompt plus answer inside
+// the LLM's context window (see llamacpp.ContextTokens).
+const (
+	chatTopK          = 6
+	chatContextBudget = 6000 // characters of excerpts, roughly 1,500 tokens
+)
+
+type chatSource struct {
+	Path string `json:"path"`
+	Name string `json:"name"`
+}
+
+// GET /api/chat — SSE streaming chat over indexed documents.
+//
+// Events, each a "data:" line with a JSON object:
+//
+//	{"sources": [{"path", "name"}]}  the files the answer draws on (first)
+//	{"token": "..."}                  a piece of the answer
+//	{"error": "..."}                  the request failed; the stream ends
+//	{"done": true}                    the answer is complete
 func (s *server) handleChat(w http.ResponseWriter, r *http.Request) {
-	question := r.URL.Query().Get("q")
+	question := strings.TrimSpace(r.URL.Query().Get("q"))
 	if question == "" {
 		apiResponse(w, http.StatusBadRequest, nil, "q query param required")
 		return
@@ -237,33 +259,48 @@ func (s *server) handleChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
+	send := func(v any) bool {
+		b, _ := json.Marshal(v)
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", b); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+	fail := func(msg string) { send(map[string]string{"error": msg}) }
 
 	queryVec, err := s.app.EmbedProvider.Embed(r.Context(), question)
 	if err != nil {
-		fmt.Fprintf(w, "data: {\"error\":%q}\n\n", err.Error())
-		flusher.Flush()
-		return
-	}
-
-	results, err := s.app.VectorStore.Search(r.Context(), queryVec, 5)
-	if err != nil {
-		fmt.Fprintf(w, "data: {\"error\":%q}\n\n", err.Error())
-		flusher.Flush()
-		return
-	}
-
-	var contextParts []string
-	for _, res := range results {
-		if meta, ok := res.Metadata["content"].(string); ok {
-			contextParts = append(contextParts, meta)
+		s.cfgMu.Lock()
+		ready := s.embeddingReady()
+		s.cfgMu.Unlock()
+		if !ready {
+			fail("The embedding model is not downloaded yet. Finish setup in Settings → General.")
+			return
 		}
+		fail("Could not read your question: " + err.Error())
+		return
 	}
-	prompt := fmt.Sprintf("Context:\n%s\n\nQuestion: %s\n\nAnswer:", strings.Join(contextParts, "\n---\n"), question)
-
-	reader, err := s.app.LLMProvider.Generate(r.Context(), prompt)
+	results, err := s.app.VectorStore.Search(r.Context(), queryVec, chatTopK)
 	if err != nil {
-		fmt.Fprintf(w, "data: {\"error\":%q}\n\n", err.Error())
-		flusher.Flush()
+		fail("Search failed: " + err.Error())
+		return
+	}
+
+	excerpts, sources := buildExcerpts(results, chatContextBudget)
+	if len(excerpts) == 0 {
+		send(map[string]string{"token": "I couldn't find anything about that in your indexed documents. " +
+			"Check that the folder holding the document is watched (Settings → General) and that indexing has finished."})
+		send(map[string]bool{"done": true})
+		return
+	}
+	if !send(map[string]any{"sources": sources}) {
+		return
+	}
+
+	reader, err := s.app.LLMProvider.Generate(r.Context(), chatPrompt(excerpts, question))
+	if err != nil {
+		fail("The language model could not start: " + err.Error())
 		return
 	}
 
@@ -271,22 +308,64 @@ func (s *server) handleChat(w http.ResponseWriter, r *http.Request) {
 	for r.Context().Err() == nil { // client gone or server shutting down
 		n, err := reader.Read(buf)
 		if n > 0 {
-			token := string(buf[:n])
-			b, _ := json.Marshal(map[string]string{"token": token})
-			if _, werr := fmt.Fprintf(w, "data: %s\n\n", b); werr != nil {
+			if !send(map[string]string{"token": string(buf[:n])}) {
 				return
 			}
-			flusher.Flush()
+		}
+		if err == io.EOF {
+			break
 		}
 		if err != nil {
-			break
+			fail(err.Error())
+			return
 		}
 	}
 	if r.Context().Err() != nil {
 		return
 	}
-	fmt.Fprint(w, "data: {\"done\":true}\n\n")
-	flusher.Flush()
+	send(map[string]bool{"done": true})
+}
+
+// buildExcerpts turns search results into numbered excerpts within budget
+// characters, and lists the distinct source files in rank order.
+func buildExcerpts(results []vector.SearchResult, budget int) ([]string, []chatSource) {
+	var excerpts []string
+	var sources []chatSource
+	seen := map[string]bool{}
+	used := 0
+	for _, res := range results {
+		content, _ := res.Metadata[pipeline.MetaContent].(string)
+		content = strings.TrimSpace(content)
+		if content == "" {
+			continue
+		}
+		if used+len(content) > budget {
+			if used > 0 {
+				break
+			}
+			content = content[:budget] // a single huge chunk: keep its start
+		}
+		used += len(content)
+		src, _ := res.Metadata[pipeline.MetaSource].(string)
+		label := filepath.Base(src)
+		if page, ok := res.Metadata["page"]; ok {
+			label += fmt.Sprintf(" (page %v)", page)
+		}
+		excerpts = append(excerpts, fmt.Sprintf("[%d] %s:\n%s", len(excerpts)+1, label, content))
+		if src != "" && !seen[src] {
+			seen[src] = true
+			sources = append(sources, chatSource{Path: src, Name: filepath.Base(src)})
+		}
+	}
+	return excerpts, sources
+}
+
+func chatPrompt(excerpts []string, question string) string {
+	return "You are Arca, a private assistant that answers questions about the user's own documents. " +
+		"Answer using only the excerpts below. If they do not contain the answer, say so briefly. " +
+		"Mention which file the answer comes from. Be concise.\n\n" +
+		"Excerpts:\n" + strings.Join(excerpts, "\n\n") +
+		"\n\nQuestion: " + question
 }
 
 // POST /api/query — natural language SQL query
@@ -301,7 +380,15 @@ func (s *server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := s.app.SQLEngine.QueryNL(r.Context(), req.Question, req.SchemaHint)
-	if err != nil {
+	switch {
+	case errors.Is(err, sqlengine.ErrNoTables):
+		apiResponse(w, http.StatusConflict, nil, err.Error())
+		return
+	case err != nil && result.SQL != "":
+		// Show the SQL the model wrote so the user can see what went wrong.
+		apiResponse(w, http.StatusUnprocessableEntity, nil, fmt.Sprintf("%v\n\nSQL: %s", err, result.SQL))
+		return
+	case err != nil:
 		apiResponse(w, http.StatusServiceUnavailable, nil, err.Error())
 		return
 	}
@@ -314,18 +401,22 @@ func (s *server) handleModels(w http.ResponseWriter, r *http.Request) {
 	type modelStatus struct {
 		modelmanager.Model
 		Downloaded bool `json:"downloaded"`
+		Active     bool `json:"active"`
 	}
+	active := s.activeModelID()
 	statuses := make([]modelStatus, 0, len(modelmanager.AvailableModels))
 	for _, m := range modelmanager.AvailableModels {
 		statuses = append(statuses, modelStatus{
 			Model:      m,
 			Downloaded: s.mm.IsPresent(m.ID),
+			Active:     m.ID == active,
 		})
 	}
 	apiResponse(w, http.StatusOK, statuses, "")
 }
 
-// POST /api/models/activate — set the active LLM model (called after download)
+// POST /api/models/activate — make a downloaded LLM the active one. The
+// embedding model, if downloaded, is activated with it.
 func (s *server) handleModelActivate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ID string `json:"id"`
@@ -335,25 +426,42 @@ func (s *server) handleModelActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	llmPath := s.mm.ModelPath(req.ID)
-	if llmPath == "" {
+	model, ok := modelmanager.Lookup(req.ID)
+	if !ok {
 		apiResponse(w, http.StatusNotFound, nil, "unknown model id")
 		return
 	}
+	if model.Kind != modelmanager.KindLLM {
+		apiResponse(w, http.StatusBadRequest, nil, "only a language model can be activated")
+		return
+	}
+	if !s.mm.IsPresent(req.ID) {
+		apiResponse(w, http.StatusConflict, nil, "the model is not downloaded yet")
+		return
+	}
+
+	llmPath := s.mm.ModelPath(req.ID)
+	var embedPath string
+	if s.mm.IsPresent(modelmanager.EmbeddingModelID) {
+		embedPath = s.mm.ModelPath(modelmanager.EmbeddingModelID)
+	}
+
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
 	if u, ok := s.app.LLMProvider.(modelPathUpdater); ok {
 		u.UpdateModelPath(llmPath)
 	}
-
-	var embedPath string
-	if s.mm.IsPresent("nomic-embed") {
-		embedPath = s.mm.ModelPath("nomic-embed")
+	s.app.Cfg.LLM.ModelPath = llmPath
+	if embedPath != "" && embedPath != s.app.Cfg.Embed.ModelPath {
 		if u, ok := s.app.EmbedProvider.(modelPathUpdater); ok {
 			u.UpdateModelPath(embedPath)
 		}
+		s.app.Cfg.Embed.ModelPath = embedPath
 	}
-
 	if err := s.app.PersistModelPaths(llmPath, embedPath); err != nil {
 		log.Printf("persist model paths: %v", err)
+		apiResponse(w, http.StatusInternalServerError, nil, "the model is active but could not be saved to the configuration")
+		return
 	}
 
 	apiResponse(w, http.StatusOK, map[string]string{"activated": req.ID}, "")
