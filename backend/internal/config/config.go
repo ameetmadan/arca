@@ -90,9 +90,9 @@ type App struct {
 	closers []func()
 }
 
-// Close releases resources the App opened itself (currently the executor's
-// journal). It is safe to call more than once. Providers are closed by the
-// caller.
+// Close releases resources the App opened itself (the executor's journal and
+// the semantic folder index). It is safe to call more than once.
+// Providers are closed by the caller.
 func (a *App) Close() {
 	closers := a.closers
 	a.closers = nil
@@ -195,6 +195,7 @@ func Load(path string) (*App, error) {
 		return nil, err
 	}
 	app.Decision, app.Rules, app.Workers = dec.Engine, dec.Rules, dec.Workers
+	app.closers = append(app.closers, dec.Closers...)
 	app.RulesPath = dec.RulesPath
 
 	return app, nil

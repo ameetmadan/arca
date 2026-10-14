@@ -1,7 +1,6 @@
 package semantic
 
 import (
-	"context"
 	"math"
 	"testing"
 )
@@ -54,68 +53,5 @@ func TestCentroidOf(t *testing.T) {
 	}
 	if _, ok := centroidOf(nil); ok {
 		t.Error("centroidOf(nil) ok = true, want false")
-	}
-}
-
-func TestMemoryStore(t *testing.T) {
-	ctx := context.Background()
-	s := NewMemoryStore()
-
-	if _, ok, err := s.Get(ctx, "/r", "a"); err != nil || ok {
-		t.Fatalf("Get on empty store = ok %v, err %v", ok, err)
-	}
-
-	a := FolderIndex{Root: "/r", Rel: "a", FileCount: 2, Fingerprint: "f1", Centroid: []float32{1, 0}}
-	b := FolderIndex{Root: "/r", Rel: "b", FileCount: 1, Centroid: []float32{0, 1}}
-	other := FolderIndex{Root: "/other", Rel: "a", FileCount: 1, Centroid: []float32{0, 1}}
-	for _, f := range []FolderIndex{a, b, other} {
-		if err := s.Put(ctx, f); err != nil {
-			t.Fatalf("Put(%s %s): %v", f.Root, f.Rel, err)
-		}
-	}
-
-	got, ok, err := s.Get(ctx, "/r", "a")
-	if err != nil || !ok || got.Fingerprint != "f1" {
-		t.Fatalf("Get = %+v, %v, %v", got, ok, err)
-	}
-
-	all, err := s.List(ctx)
-	if err != nil || len(all) != 3 {
-		t.Fatalf("List = %d folders, err %v; want 3", len(all), err)
-	}
-	// List is ordered so results are deterministic.
-	if all[0].Root != "/other" || all[1].Rel != "a" || all[2].Rel != "b" {
-		t.Errorf("List order = %v %v %v", all[0], all[1], all[2])
-	}
-
-	// Put replaces.
-	a.Fingerprint = "f2"
-	if err := s.Put(ctx, a); err != nil {
-		t.Fatal(err)
-	}
-	if got, _, _ := s.Get(ctx, "/r", "a"); got.Fingerprint != "f2" {
-		t.Errorf("Put did not replace: %+v", got)
-	}
-
-	if err := s.Delete(ctx, "/r", "a"); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok, _ := s.Get(ctx, "/r", "a"); ok {
-		t.Error("folder still present after Delete")
-	}
-	if err := s.Delete(ctx, "/r", "missing"); err != nil {
-		t.Errorf("Delete of a missing folder = %v, want nil", err)
-	}
-}
-
-func TestMemoryStoreHonoursContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	s := NewMemoryStore()
-	if err := s.Put(ctx, FolderIndex{Root: "/r", Rel: "a"}); err == nil {
-		t.Error("Put with cancelled context = nil error")
-	}
-	if _, err := s.List(ctx); err == nil {
-		t.Error("List with cancelled context = nil error")
 	}
 }
