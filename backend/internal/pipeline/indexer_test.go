@@ -5,6 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -171,5 +175,159 @@ func TestIndexer_HandleIndexesPathWithQuoteAndNewline(t *testing.T) {
 	}
 	if len(store.ids) != 1 || store.ids[0] != path+"#0" {
 		t.Fatalf("store ids = %q, want %q", store.ids, path+"#0")
+	}
+}
+
+// chunkStore is an in-memory store that implements vector.ChunkDeleter with
+// the same matching rules as the real ones.
+type chunkStore struct {
+	fakeStore
+	have map[string]bool
+}
+
+func newChunkStore() *chunkStore { return &chunkStore{have: map[string]bool{}} }
+
+func (c *chunkStore) Upsert(ctx context.Context, id string, v []float32, m map[string]interface{}) error {
+	if err := c.fakeStore.Upsert(ctx, id, v, m); err != nil {
+		return err
+	}
+	c.have[id] = true
+	return nil
+}
+
+func (c *chunkStore) DeleteChunks(_ context.Context, prefix string, from int) error {
+	for id := range c.have {
+		rest, ok := strings.CutPrefix(id, prefix)
+		if !ok {
+			continue
+		}
+		if n, err := strconv.Atoi(rest); err == nil && n >= from && strconv.Itoa(n) == rest {
+			delete(c.have, id)
+		}
+	}
+	return nil
+}
+
+func (c *chunkStore) ids() []string {
+	out := make([]string, 0, len(c.have))
+	for id := range c.have {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func TestIndexer_RemovedDeletesAllChunksOfTheFile(t *testing.T) {
+	store := newChunkStore()
+	ix := &Indexer{Parser: &fakeParser{chunks: twoChunks()}, Embed: &fakeEmbed{}, Store: store}
+	ctx := context.Background()
+	dir := t.TempDir()
+	a, other, lookalike := filepath.Join(dir, "a.txt"), filepath.Join(dir, "b.txt"), filepath.Join(dir, "a.txt#1")
+	for _, p := range []string{a, other, lookalike} {
+		if _, err := ix.IndexFile(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// a.txt is not on disk, as after a delete.
+	if err := ix.Handle(ctx, Event{Op: Removed, Path: a}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{lookalike + "#0", lookalike + "#1", other + "#0", other + "#1"}
+	if got := store.ids(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("ids after delete = %v, want %v", got, want)
+	}
+}
+
+// fsnotify reports a rename as a Remove-like event for the old name and a
+// Create for the new one: together they move the chunks.
+func TestIndexer_RenameMovesChunks(t *testing.T) {
+	store := newChunkStore()
+	ix := &Indexer{Parser: &fakeParser{chunks: twoChunks()}, Embed: &fakeEmbed{}, Store: store}
+	ctx := context.Background()
+	dir := t.TempDir()
+	oldPath, newPath := filepath.Join(dir, "old.txt"), filepath.Join(dir, "new.txt")
+	if err := os.WriteFile(oldPath, []byte("body"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ix.IndexFile(ctx, oldPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Rename(oldPath, newPath); err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range []Event{{Op: Removed, Path: oldPath}, {Op: Created, Path: newPath}} {
+		if err := ix.Handle(ctx, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{newPath + "#0", newPath + "#1"}
+	if got := store.ids(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("ids after rename = %v, want %v", got, want)
+	}
+}
+
+func TestIndexer_RemovedKeepsChunksOfAFileThatCameBack(t *testing.T) {
+	store := newChunkStore()
+	ix := &Indexer{Parser: &fakeParser{chunks: twoChunks()}, Embed: &fakeEmbed{}, Store: store}
+	path := touch(t, "a.txt")
+	if _, err := ix.IndexFile(context.Background(), path); err != nil {
+		t.Fatal(err)
+	}
+	if err := ix.Handle(context.Background(), Event{Op: Removed, Path: path}); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.ids()) != 2 {
+		t.Fatalf("chunks of a file that exists again were deleted: %v", store.ids())
+	}
+}
+
+func TestIndexer_ShrunkFileDropsItsTailChunks(t *testing.T) {
+	store := newChunkStore()
+	fp := &fakeParser{chunks: twoChunks()}
+	ix := &Indexer{Parser: fp, Embed: &fakeEmbed{}, Store: store}
+	ctx := context.Background()
+	if _, err := ix.IndexFile(ctx, "/a.txt"); err != nil {
+		t.Fatal(err)
+	}
+	fp.chunks = twoChunks()[:1]
+	if _, err := ix.IndexFile(ctx, "/a.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := store.ids(), []string{"/a.txt#0"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ids = %v, want %v", got, want)
+	}
+}
+
+func TestIndexer_FailedIndexKeepsOldChunks(t *testing.T) {
+	store := newChunkStore()
+	fp := &fakeParser{chunks: twoChunks()}
+	em := &fakeEmbed{}
+	ix := &Indexer{Parser: fp, Embed: em, Store: store}
+	ctx := context.Background()
+	if _, err := ix.IndexFile(ctx, "/a.txt"); err != nil {
+		t.Fatal(err)
+	}
+	em.err = errors.New("boom")
+	if _, err := ix.IndexFile(ctx, "/a.txt"); err == nil {
+		t.Fatal("want an error")
+	}
+	if len(store.ids()) != 2 {
+		t.Fatalf("a failed re-index must not lose the old chunks: %v", store.ids())
+	}
+}
+
+type failingDeleter struct{ chunkStore }
+
+func (*failingDeleter) DeleteChunks(context.Context, string, int) error { return errors.New("boom") }
+
+func TestIndexer_CleanupFailureIsReported(t *testing.T) {
+	ix := &Indexer{Parser: &fakeParser{chunks: twoChunks()}, Embed: &fakeEmbed{},
+		Store: &failingDeleter{chunkStore{have: map[string]bool{}}}}
+	_, err := ix.IndexFile(context.Background(), "/a.txt")
+	var ie *IndexError
+	if !errors.As(err, &ie) || ie.Stage != StageCleanup {
+		t.Fatalf("err = %v, want IndexError at stage %s", err, StageCleanup)
 	}
 }

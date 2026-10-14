@@ -14,6 +14,8 @@ var ErrNotBuilt = errors.New("sqlitevec: binary not built with sqlite-vec CGo ex
 
 type SQLiteVecStore struct{ DBPath string }
 
+var _ vector.ChunkDeleter = (*SQLiteVecStore)(nil)
+
 func New(dbPath string) (*SQLiteVecStore, error) {
 	return &SQLiteVecStore{DBPath: dbPath}, nil
 }
@@ -27,6 +29,10 @@ func (s *SQLiteVecStore) Search(_ context.Context, _ []float32, _ int) ([]vector
 }
 
 func (s *SQLiteVecStore) Delete(_ context.Context, _ string) error {
+	return ErrNotBuilt
+}
+
+func (s *SQLiteVecStore) DeleteChunks(_ context.Context, _ string, _ int) error {
 	return ErrNotBuilt
 }
 
