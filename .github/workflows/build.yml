@@ -95,6 +95,12 @@ jobs:
         working-directory: app
         run: swift test
 
+      # Same linkage as the app on macOS: proves sqlite-vec's vec0 module
+      # registers against the SQLite compiled into the binary.
+      - name: Go provider tests (sqlite-vec, DuckDB) on macOS
+        working-directory: backend
+        run: go test -tags sqlitevec,duckdb ./pkg/vector/... ./pkg/sqlengine/...
+
       - name: Build Arca.app
         run: make dist VERSION="${{ steps.version.outputs.version }}" BUILD_NUMBER="${{ github.run_number }}"
 
