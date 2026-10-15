@@ -1,12 +1,11 @@
 LLAMA_DIR    := $(HOME)/llama.cpp
 LLAMA_BUILD  := $(LLAMA_DIR)/build
 
-LLAMA_LIB    := $(LLAMA_BUILD)/src/libllama.a
-GGML_LIB     := $(LLAMA_BUILD)/ggml/src/libggml.a
-GGML_CPU_LIB := $(LLAMA_BUILD)/ggml/src/libggml-cpu.a
-GGML_BASE    := $(LLAMA_BUILD)/ggml/src/libggml-base.a
-GGML_METAL   := $(LLAMA_BUILD)/ggml/src/ggml-metal/libggml-metal.a
-GGML_BLAS    := $(LLAMA_BUILD)/ggml/src/ggml-blas/libggml-blas.a
+# Stamped into Info.plist by `make dist`; CI passes the tag (e.g. 0.1.0).
+VERSION      ?= 0.0.0-dev
+BUILD_NUMBER ?= 1
+
+export MACOSX_DEPLOYMENT_TARGET ?= 14.0
 
 LLAMA_INCLUDE := $(LLAMA_DIR)/include
 GGML_INCLUDE  := $(LLAMA_DIR)/ggml/include
@@ -30,9 +29,16 @@ llama-build:
 	  -DBUILD_SHARED_LIBS=OFF \
 	  -DGGML_NATIVE=OFF \
 	  -DCMAKE_OSX_ARCHITECTURES=arm64 \
+	  -DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) \
+	  -DCMAKE_BUILD_TYPE=Release \
 	  -DLLAMA_BUILD_TESTS=OFF \
 	  -DLLAMA_BUILD_EXAMPLES=OFF \
-	  -DLLAMA_BUILD_SERVER=OFF
+	  -DLLAMA_BUILD_TOOLS=OFF \
+	  -DLLAMA_BUILD_SERVER=OFF \
+	  -DLLAMA_BUILD_COMMON=OFF \
+	  -DLLAMA_BUILD_APP=OFF \
+	  -DLLAMA_OPENSSL=OFF \
+	  -DLLAMA_CURL=OFF
 	cmake --build $(LLAMA_BUILD) --config Release -j8 --target llama
 
 ## Build the Go backend binary (with llama.cpp, sqlite-vec, and DuckDB linked in)
@@ -41,31 +47,34 @@ backend:
 	  CGO_ENABLED=1 \
 	  CGO_CFLAGS="$(CGO_CFLAGS)" \
 	  CGO_LDFLAGS="$(CGO_LDFLAGS)" \
-	  go build -tags llamacpp,sqlitevec,duckdb -o arca-server ./cmd/server
+	  go build -tags llamacpp,sqlitevec,duckdb -ldflags "-X main.version=$(VERSION)" -o arca-server ./cmd/server
 
-## Copy the backend binary into the Swift package's Resources (used by swift build)
+## Copy the backend binary next to the Swift package so `swift run` finds it
 bundle: backend
-	mkdir -p app/Sources/Arca/Resources
-	cp backend/arca-server app/Sources/Arca/Resources/arca-server
+	cp backend/arca-server app/arca-server
 
-## Assemble a self-contained Arca.app in dist/
-dist: bundle
+## Assemble a self-contained, ad-hoc signed Arca.app in dist/
+dist: backend
 	rm -rf dist/Arca.app
-	mkdir -p dist/Arca.app/Contents/MacOS
-	mkdir -p dist/Arca.app/Contents/Resources
-	cd app && swift build -c release 2>&1
-	cp app/.build/arm64-apple-macosx/release/Arca dist/Arca.app/Contents/MacOS/Arca
+	mkdir -p dist/Arca.app/Contents/MacOS dist/Arca.app/Contents/Resources
+	cd app && swift build -c release --arch arm64
+	cp "$$(cd app && swift build -c release --arch arm64 --show-bin-path)/Arca" dist/Arca.app/Contents/MacOS/Arca
 	cp backend/arca-server dist/Arca.app/Contents/Resources/arca-server
 	cp app/Info.plist dist/Arca.app/Contents/Info.plist
-	chmod +x dist/Arca.app/Contents/MacOS/Arca
-	chmod +x dist/Arca.app/Contents/Resources/arca-server
-	codesign --force --deep --sign - dist/Arca.app
-	@echo "Built: dist/Arca.app"
+	cp app/AppIcon.icns dist/Arca.app/Contents/Resources/AppIcon.icns
+	/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(VERSION)" dist/Arca.app/Contents/Info.plist
+	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(BUILD_NUMBER)" dist/Arca.app/Contents/Info.plist
+	chmod +x dist/Arca.app/Contents/MacOS/Arca dist/Arca.app/Contents/Resources/arca-server
+	# Sign inside-out: the nested backend first, then the bundle.
+	codesign --force --sign - --identifier com.ameetmadan.Arca.server dist/Arca.app/Contents/Resources/arca-server
+	codesign --force --sign - dist/Arca.app
+	codesign --verify --strict --verbose=2 dist/Arca.app
+	@echo "Built: dist/Arca.app ($(VERSION))"
 
 ## Build without CGo (stubs only — for testing the server/API layer)
 backend-stub:
-	cd backend && go build -o arca-server ./cmd/server
+	cd backend && go build -ldflags "-X main.version=$(VERSION)" -o arca-server ./cmd/server
 
 clean:
-	rm -f backend/arca-server app/Sources/Arca/Resources/arca-server
+	rm -f backend/arca-server app/arca-server
 	rm -rf dist/
