@@ -139,8 +139,9 @@ jobs:
         run: |
           prerelease=""
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease="--prerelease"; fi
+          sed "s/{{TAG}}/$GITHUB_REF_NAME/g" docs/release-notes.md > release-notes.md
           gh release create "$GITHUB_REF_NAME" \
             "${{ steps.package.outputs.zip }}" "${{ steps.package.outputs.zip }}.sha256" \
             --title "Arca $GITHUB_REF_NAME" \
-            --notes-file docs/release-notes.md \
+            --notes-file release-notes.md \
             $prerelease

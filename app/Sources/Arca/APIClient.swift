@@ -498,7 +498,7 @@ struct FolderPolicy: Decodable, Equatable {
     }
 }
 
-struct TableColumn: Decodable, Hashable {
+struct TableColumnInfo: Decodable, Hashable {
     let name: String
     let type: String
 }
@@ -507,7 +507,7 @@ struct TableInfo: Decodable, Identifiable, Hashable {
     let name: String
     let source: String
     let rows: Int
-    let columns: [TableColumn]
+    let columns: [TableColumnInfo]
     var id: String { name }
 }
 
