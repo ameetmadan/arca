@@ -7,8 +7,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "Arca",
-            path: "Sources/Arca",
-            resources: [.process("Resources")]
+            path: "Sources/Arca"
         ),
         // Pure-logic tests (JSON decoding, request shapes). Run with `swift test`;
         // `swift build` does not build this target.
