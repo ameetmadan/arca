@@ -9,6 +9,12 @@ import (
 	"io"
 )
 
+// ContextTokens and MaxNewTokens mirror the CGo build.
+const (
+	ContextTokens = 4096
+	MaxNewTokens  = 1024
+)
+
 var ErrNotBuilt = errors.New("llamacpp: binary not built with llama.cpp CGo bindings (build tag: llamacpp)")
 
 type LlamaCppProvider struct{ ModelPath string }

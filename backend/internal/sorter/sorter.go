@@ -106,12 +106,23 @@ func (s *Sorter) Suggest(ctx context.Context, folder string) ([]Suggestion, erro
 	return out, nil
 }
 
-// sortClusters embeds, clusters and names the files under folder.
+// sortClusters embeds, clusters and names the files directly in folder.
+// Files already in sub-folders count as sorted and are left alone, as are
+// hidden files.
 func (s *Sorter) sortClusters(ctx context.Context, folder string) ([]clusterMove, error) {
 	var relPaths, texts []string
 
 	err := filepath.WalkDir(folder, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if path != folder {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") {
 			return nil
 		}
 		text := s.fileText(path)

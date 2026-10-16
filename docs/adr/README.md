@@ -19,5 +19,7 @@ Context, Decision, Consequences, plus the alternatives that were considered.
 | [0006](0006-decision-engine-chain-with-policy-and-executor.md) | Decision engine: rules → semantic → LLM chain, with separate Policy and Executor | Proposed | 2026-10-12 |
 | [0007](0007-learn-from-existing-folders-not-forced-training.md) | Learn from existing folders and corrections instead of forced up-front training | Proposed | 2026-10-12 |
 | [0008](0008-hosted-decision-models-optional-only.md) | Hosted decision models (e.g. Jev) are optional, opt-in providers only | Proposed | 2026-10-12 |
+| [0009](0009-ci-built-ad-hoc-signed-releases.md) | Releases are built in CI on macOS and ad-hoc signed | Proposed | 2026-10-15 |
+| [0010](0010-restart-server-to-apply-watched-folders.md) | The app restarts the server to apply watched-folder and model changes | Proposed | 2026-10-15 |
 
 See [`../architecture/README.md`](../architecture/README.md) for the diagrams.

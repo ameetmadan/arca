@@ -3,7 +3,7 @@
 package nomic
 
 /*
-#cgo LDFLAGS: -framework Metal -framework Foundation -framework Accelerate
+#cgo darwin LDFLAGS: -framework Metal -framework Foundation -framework Accelerate
 
 #include "llama.h"
 #include <stdlib.h>
@@ -115,11 +115,19 @@ func (e *NomicEmbedder) Embed(_ context.Context, text string) ([]float32, error)
 	cText := C.CString(prefixed)
 	defer C.free(unsafe.Pointer(cText))
 
-	tokensBuf := make([]C.llama_token, maxTokens)
+	// Tokenise everything, then keep the first maxTokens: text beyond the
+	// model's window is dropped rather than failing the whole file. A token
+	// never spans less than one byte, so len+16 slots are always enough.
+	tokensBuf := make([]C.llama_token, len(prefixed)+16)
 	nTokens := C.arca_embed_tokenize(e.vocab, cText, C.int32_t(len(prefixed)),
-		(*C.llama_token)(unsafe.Pointer(&tokensBuf[0])), C.int32_t(maxTokens))
+		(*C.llama_token)(unsafe.Pointer(&tokensBuf[0])), C.int32_t(len(tokensBuf)))
 	if nTokens < 0 {
 		return nil, fmt.Errorf("nomic: tokenize failed (need %d slots)", -nTokens)
+	}
+	if nTokens > maxTokens {
+		// Keep the closing special token ([SEP]) the tokenizer appended.
+		tokensBuf[maxTokens-1] = tokensBuf[nTokens-1]
+		nTokens = maxTokens
 	}
 
 	// Mark the last token so the context outputs embeddings for it.

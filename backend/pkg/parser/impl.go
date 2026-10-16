@@ -16,20 +16,43 @@ type MultiParser struct{}
 
 func NewMultiParser() *MultiParser { return &MultiParser{} }
 
+// supportedExts lists the extensions MultiParser can read.
+var supportedExts = map[string]bool{
+	".md": true, ".markdown": true, ".txt": true, ".text": true, ".csv": true,
+	".pdf": true, ".docx": true, ".xlsx": true,
+}
+
+// Supported reports whether MultiParser can read the file at path, judged by
+// its extension.
+func Supported(path string) bool {
+	return supportedExts[strings.ToLower(filepath.Ext(path))]
+}
+
+// Supported reports whether Parse can read the file at path.
+func (m *MultiParser) Supported(path string) bool { return Supported(path) }
+
 func (m *MultiParser) Parse(path string) ([]Chunk, error) {
 	ext := strings.ToLower(filepath.Ext(path))
+	var chunks []Chunk
+	var err error
 	switch ext {
-	case ".md", ".txt":
-		return parsePlainText(path, ext)
+	case ".md", ".markdown", ".txt", ".text", ".csv":
+		chunks, err = parsePlainText(path, ext)
 	case ".pdf":
-		return parsePDF(path)
+		chunks, err = parsePDF(path)
 	case ".docx":
-		return parseDOCX(path)
+		chunks, err = parseDOCX(path)
 	case ".xlsx":
+		// Rows are already grouped; splitting would separate them from
+		// their header row.
 		return parseXLSX(path)
 	default:
 		return nil, fmt.Errorf("parser: unsupported file extension %q", ext)
 	}
+	if err != nil {
+		return nil, err
+	}
+	return Rechunk(chunks, DefaultChunkChars), nil
 }
 
 // ── plain text ────────────────────────────────────────────────────────────────

@@ -4,6 +4,8 @@
 <dict>
     <key>CFBundleExecutable</key>
     <string>Arca</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.ameetmadan.Arca</string>
     <key>CFBundleName</key>
@@ -26,6 +28,16 @@
     <true/>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.productivity</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>Arca reads the documents in the folders you choose so you can search them and so it can suggest where new files belong. Nothing leaves your Mac.</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>Arca reads the documents in the folders you choose so you can search them and so it can suggest where new files belong. Nothing leaves your Mac.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>Arca reads the documents in the folders you choose so you can search them and so it can suggest where new files belong. Nothing leaves your Mac.</string>
+    <key>NSRemovableVolumesUsageDescription</key>
+    <string>Arca reads the documents in the folders you choose so you can search them and so it can suggest where new files belong. Nothing leaves your Mac.</string>
+    <key>NSNetworkVolumesUsageDescription</key>
+    <string>Arca reads the documents in the folders you choose so you can search them and so it can suggest where new files belong. Nothing leaves your Mac.</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 Ameet Madan. All rights reserved.</string>
 </dict>
