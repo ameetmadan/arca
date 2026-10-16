@@ -151,11 +151,16 @@ struct RuleTestResult: Decodable, Equatable {
     }
 }
 
-/// The server's suggestions list has no defined item shape yet (it is always
-/// empty). Items are decoded without looking at their content.
-struct RuleSuggestion: Decodable, Equatable {
-    init() {}
-    init(from decoder: Decoder) throws {}
+/// Proposed corrections are never active until explicitly saved as rules.
+struct RuleSuggestion: Decodable, Equatable, Identifiable {
+    let id: String
+    let root: String
+    let when: String
+    let action: String
+    let target: String
+    let reason: String
+    let enabled: Bool
+    let count: Int
 }
 
 struct RuleSuggestionList: Decodable {

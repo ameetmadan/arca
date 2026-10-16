@@ -69,6 +69,10 @@ type SubmitResult struct {
 // If an automatic application fails, the failure is recorded (status failed)
 // and returned together with the result, so callers can log it and move on.
 func (s *Service) Submit(ctx context.Context, root, file string, d decision.Decision) (SubmitResult, error) {
+	return s.SubmitWithFacts(ctx, root, file, d, decision.Facts{})
+}
+
+func (s *Service) SubmitWithFacts(ctx context.Context, root, file string, d decision.Decision, facts decision.Facts) (SubmitResult, error) {
 	if err := validateRoot(root); err != nil {
 		return SubmitResult{}, err
 	}
@@ -103,7 +107,8 @@ func (s *Service) Submit(ctx context.Context, root, file string, d decision.Deci
 	}
 
 	rec := Record{
-		TS: s.d.Now().UTC(), Root: root, File: file, Action: d.Action, Target: d.Target,
+		Vector: facts.Vector,
+		TS:     s.d.Now().UTC(), Root: root, File: file, Action: d.Action, Target: d.Target,
 		Confidence: d.Confidence, Reason: d.Reason, Source: d.Source, Status: StatusPending,
 	}
 	if outcome == policy.Queue {
@@ -218,6 +223,13 @@ func (s *Service) Accept(ctx context.Context, id int64, target string) (Record, 
 		return Record{}, claimError(err, rec.Status)
 	}
 
+	// A calibration answer can confirm the file's current folder without a move.
+	if rec.Source == "calibration" && filepath.Clean(filepath.Dir(rec.File)) == filepath.Clean(d.Target) {
+		if err := s.d.Queue.Transition(context.WithoutCancel(ctx), id, StatusAccepted, StatusAccepted, Update{Target: &d.Target, Resolved: true}); err != nil {
+			return Record{}, err
+		}
+		return s.d.Queue.Get(context.WithoutCancel(ctx), id)
+	}
 	entry, execErr := s.d.Exec.Execute(ctx, rec.Root, d, rec.File)
 
 	// The file may already have moved, so bookkeeping must survive a cancelled ctx.

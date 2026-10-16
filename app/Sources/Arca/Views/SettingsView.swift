@@ -10,6 +10,9 @@ struct SettingsView: View {
     @State private var downloadProgress: Double = 0
     @State private var busy = false
     @State private var error: String?
+    @State private var autoFolder: String?
+    @State private var confirmAuto = false
+    @State private var showCalibration = false
 
     var body: some View {
         Form {
@@ -24,7 +27,10 @@ struct SettingsView: View {
                 }
                 ForEach(appState.watchedFolderPaths, id: \.self) { path in
                     FolderRow(path: path, policy: policies[path], disabled: busy,
-                              onMode: { mode in Task { await setMode(mode, for: path) } },
+                              onMode: { mode in
+                                  if mode == .auto { autoFolder = path; confirmAuto = true }
+                                  else { Task { await setMode(mode, for: path) } }
+                              },
                               onRemove: { Task { await removeFolder(path) } })
                 }
                 HStack {
@@ -63,6 +69,8 @@ struct SettingsView: View {
             }
 
             Section("Search Index") {
+                Button("Improve Suggestions…") { showCalibration = true }
+                    .disabled(!backend.isRunning)
                 LabeledContent("Status") {
                     Text(appState.indexStatus?.summary ?? "—").foregroundStyle(.secondary)
                 }
@@ -87,6 +95,15 @@ struct SettingsView: View {
                 LabeledContent("Server version", value: appState.settings?.version ?? "—")
                 Button("Run Setup Again…") { appState.onboardingComplete = false }
             }
+        }
+        .sheet(isPresented: $showCalibration) { CalibrationView() }
+        .confirmationDialog("Allow automatic file moves?", isPresented: $confirmAuto) {
+            Button("Enable Automatic Moves") {
+                if let path = autoFolder { Task { await setMode(.auto, for: path) } }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Arca will move confident suggestions in this folder without asking. You can undo recent moves in the Inbox.")
         }
         .formStyle(.grouped)
         .frame(width: 560, height: 620)

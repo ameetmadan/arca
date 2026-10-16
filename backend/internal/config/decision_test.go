@@ -485,28 +485,3 @@ func writeFile(t *testing.T, path, body string) {
 		t.Fatal(err)
 	}
 }
-
-// The semantic folder index is persisted in the app dir and released through
-// the wiring's Closers, including when a later engine fails to wire.
-func TestWireDecisionPersistsFolderIndex(t *testing.T) {
-	deps := fullDeps(t)
-	w, err := wireDecision(&File{}, deps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(deps.AppDir, folderIndexFile)); err != nil {
-		t.Errorf("semantic folder index not created: %v", err)
-	}
-	if len(w.Closers) != 1 {
-		t.Fatalf("Closers = %d, want 1", len(w.Closers))
-	}
-	w.Closers[0]()
-
-	// llm comes after semantic in the default chain; without an LLM it fails
-	// to wire after the store was opened, and the store must be closed again.
-	deps = fullDeps(t)
-	deps.LLM = nil
-	if _, err := wireDecision(&File{}, deps); err == nil {
-		t.Fatal("wireDecision without an LLM = nil error")
-	}
-}

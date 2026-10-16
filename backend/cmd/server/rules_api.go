@@ -87,7 +87,19 @@ func (s *server) rulesRoutes(r chi.Router) {
 		})
 		r.Get("/", func(w http.ResponseWriter, req *http.Request) { api.handleList(w, req) })
 		r.Post("/", func(w http.ResponseWriter, req *http.Request) { api.handleCreate(w, req) })
-		r.Get("/suggestions", func(w http.ResponseWriter, req *http.Request) { api.handleSuggestions(w, req) })
+		r.Get("/suggestions", func(w http.ResponseWriter, req *http.Request) {
+			if s.app != nil && s.app.Feedback != nil {
+				threshold := s.app.Cfg.Decision.SuggestionThreshold
+				suggestions, err := s.app.Feedback.Suggestions(req.Context(), threshold)
+				if err != nil {
+					apiResponse(w, 500, nil, "could not load suggestions")
+					return
+				}
+				apiResponse(w, 200, map[string]any{"suggestions": suggestions}, "")
+			} else {
+				api.handleSuggestions(w, req)
+			}
+		})
 		r.Post("/validate", func(w http.ResponseWriter, req *http.Request) { api.handleValidate(w, req) })
 		r.Post("/test", func(w http.ResponseWriter, req *http.Request) { api.handleTest(w, req) })
 		r.Put("/order", func(w http.ResponseWriter, req *http.Request) { api.handleOrder(w, req) })

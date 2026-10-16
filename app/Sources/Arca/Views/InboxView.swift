@@ -11,19 +11,23 @@ struct InboxView: View {
     @State private var loading = false
     @State private var busyID: Int64?
     @State private var error: String?
+    @State private var bulkThreshold = 0.9
+    @State private var bulkBusy = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
-            if pending.isEmpty && recent.isEmpty && !loading {
+            if loading && pending.isEmpty && recent.isEmpty {
+                ProgressView("Loading suggestions…").frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if pending.isEmpty && recent.isEmpty && !loading {
                 emptyState
             } else {
                 List {
                     if !pending.isEmpty {
                         SwiftUI.Section("Waiting for you (\(pending.count))") {
                             ForEach(pending) { decision in
-                                PendingRow(decision: decision, busy: busyID == decision.id,
+                                PendingRow(decision: decision, busy: bulkBusy || busyID == decision.id,
                                            onMove: { Task { await accept(decision, target: nil) } },
                                            onChoose: { chooseFolder(for: decision) },
                                            onSkip: { Task { await reject(decision) } })
@@ -33,7 +37,7 @@ struct InboxView: View {
                     if !recent.isEmpty {
                         SwiftUI.Section("Recently moved") {
                             ForEach(recent) { decision in
-                                RecentRow(decision: decision, busy: busyID == decision.id) {
+                                RecentRow(decision: decision, busy: bulkBusy || busyID == decision.id) {
                                     Task { await undo(decision) }
                                 }
                             }
@@ -51,10 +55,17 @@ struct InboxView: View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Inbox").font(.title2.bold())
-                Text("Suggestions for new files in your watched folders. Nothing moves until you choose.")
+                Text("Suggestions for new files in your watched folders. Review suggestions and undo recent moves here.")
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            Picker("Minimum confidence", selection: $bulkThreshold) {
+                Text("90%+").tag(0.9)
+                Text("95%+").tag(0.95)
+                Text("100%").tag(1.0)
+            }.frame(width: 160)
+            Button("Move Matching") { Task { await acceptMatching() } }
+                .disabled(bulkBusy || busyID != nil || matching.isEmpty)
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
@@ -112,6 +123,23 @@ struct InboxView: View {
         }
     }
 
+    private var matching: [Decision] {
+        pending.filter { $0.action == "move" && $0.confidence >= bulkThreshold }
+    }
+
+    private func acceptMatching() async {
+        bulkBusy = true
+        defer { bulkBusy = false }
+        var failure: String?
+        for decision in matching {
+            do { _ = try await APIClient.shared.acceptDecision(id: decision.id) }
+            catch { failure = error.localizedDescription; break }
+        }
+        await load()
+        await appState.decisionsChanged()
+        if let failure { error = failure }
+    }
+
     private func accept(_ decision: Decision, target: String?) async {
         busyID = decision.id
         defer { busyID = nil }
@@ -120,6 +148,7 @@ struct InboxView: View {
             error = nil
         } catch {
             self.error = error.localizedDescription
+            return
         }
         await load()
         await appState.decisionsChanged()
@@ -133,6 +162,7 @@ struct InboxView: View {
             error = nil
         } catch {
             self.error = error.localizedDescription
+            return
         }
         await load()
         await appState.decisionsChanged()

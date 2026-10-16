@@ -24,11 +24,12 @@ import (
 )
 
 type server struct {
-	app    *config.App
-	mm     *modelmanager.Manager
-	sorter *sorter.Sorter
-	exec   *executor.Executor // nil when the journal could not be opened
-	rules  *rulesAPI          // /api/v1/rules; see rules_api.go
+	apiToken string
+	app      *config.App
+	mm       *modelmanager.Manager
+	sorter   *sorter.Sorter
+	exec     *executor.Executor // nil when the journal could not be opened
+	rules    *rulesAPI          // /api/v1/rules; see rules_api.go
 
 	decisions *decisions.Service // nil when the queue database could not be opened
 
@@ -53,11 +54,16 @@ func main() {
 	exitWithParent := flag.Bool("exit-with-parent", false,
 		"shut down when the parent process exits (the app passes this so a crash never leaves the server running)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
+	insecureDev := flag.Bool("insecure-dev", false, "allow unauthenticated development access")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Println(version)
 		return
+	}
+	token := os.Getenv("ARCA_API_TOKEN")
+	if token == "" && !*insecureDev {
+		log.Fatal("ARCA_API_TOKEN is required (use --insecure-dev only for local development)")
 	}
 	log.Printf("arca-server %s", version)
 
@@ -88,6 +94,7 @@ func main() {
 	}
 	decSvc, closeDecisions := newDecisionService(filepath.Dir(*cfgPath), fileExec)
 	srv := &server{
+		apiToken:  token,
 		recent:    recent,
 		decisions: decSvc,
 		app:       app,
@@ -177,7 +184,11 @@ func watchParent(ctx context.Context, ppid int, every time.Duration, onExit func
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:44742")
+		// Native clients send no Origin. Browser access is intentionally disabled.
+		if r.Header.Get("Origin") != "" {
+			apiResponse(w, http.StatusForbidden, nil, "browser access is disabled")
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }

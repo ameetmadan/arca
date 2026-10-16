@@ -167,7 +167,15 @@ func (d *Decider) decide(ctx context.Context, ev Event) error {
 	if d.Recent.Contains(path) {
 		return nil
 	}
-	if _, err := d.Queue.Submit(ctx, root, rel, dec); err != nil {
+	var submitErr error
+	if q, ok := d.Queue.(interface {
+		SubmitWithFacts(context.Context, string, string, decision.Decision, decision.Facts) (decisions.SubmitResult, error)
+	}); ok {
+		_, submitErr = q.SubmitWithFacts(ctx, root, rel, dec, facts)
+	} else {
+		_, submitErr = d.Queue.Submit(ctx, root, rel, dec)
+	}
+	if err := submitErr; err != nil {
 		return fmt.Errorf("submit decision: %w", err)
 	}
 	return nil

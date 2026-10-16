@@ -107,8 +107,8 @@ jobs:
       - name: Smoke-test the bundled backend
         run: |
           set -euo pipefail
-          home="$(mktemp -d)"
-          HOME="$home" dist/Arca.app/Contents/Resources/arca-server -exit-with-parent=false > server.log 2>&1 &
+          smoke_home="$(mktemp -d)"
+          HOME="$smoke_home" dist/Arca.app/Contents/Resources/arca-server --insecure-dev -exit-with-parent=false > server.log 2>&1 &
           pid=$!
           for _ in $(seq 1 60); do
             if curl -fsS http://localhost:44742/health >/dev/null; then break; fi
@@ -117,7 +117,7 @@ jobs:
           curl -fsS http://localhost:44742/health
           curl -fsS http://localhost:44742/api/v1/settings
           curl -fsS http://localhost:44742/api/v1/models
-          test -f "$home/Library/Application Support/Arca/config.yaml"
+          test -f "$smoke_home/Library/Application Support/Arca/config.yaml"
           kill "$pid"
           wait "$pid" || true
           cat server.log

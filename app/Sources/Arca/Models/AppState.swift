@@ -9,6 +9,7 @@ final class AppState: ObservableObject {
     @Published private(set) var settings: ServerSettings?
     @Published private(set) var indexStatus: IndexStatus?
     @Published private(set) var pendingCount = 0
+    @Published var offerCalibration = false
     @Published var onboardingComplete: Bool {
         didSet { defaults.set(onboardingComplete, forKey: Self.onboardingKey) }
     }
@@ -51,7 +52,13 @@ final class AppState: ObservableObject {
     }
 
     private func refreshActivity() async {
-        if let status = try? await APIClient.shared.indexStatus() { indexStatus = status }
+        if let status = try? await APIClient.shared.indexStatus() {
+            indexStatus = status
+            if onboardingComplete && !status.running && status.searchable > 0 && status.finishedAt != nil && !defaults.bool(forKey: "calibrationOffered") {
+                defaults.set(true, forKey: "calibrationOffered")
+                offerCalibration = true
+            }
+        }
         if let page = try? await APIClient.shared.decisions(status: .pending, limit: 1) { pendingCount = page.total }
     }
 

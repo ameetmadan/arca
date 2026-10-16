@@ -34,8 +34,8 @@ struct RuleEditorView: View {
         case id, when, target, reason
     }
 
-    init(editing rule: Rule?, limits: RuleLimits, watchedFolders: [URL], onSaved: @escaping (Rule) -> Void) {
-        _model = StateObject(wrappedValue: RuleEditorModel(editing: rule))
+    init(editing rule: Rule?, suggestion: RuleSuggestion? = nil, limits: RuleLimits, watchedFolders: [URL], onSaved: @escaping (Rule) -> Void) {
+        _model = StateObject(wrappedValue: RuleEditorModel(editing: rule, suggestion: suggestion))
         self.limits = limits
         self.watchedFolders = watchedFolders
         self.onSaved = onSaved
