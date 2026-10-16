@@ -31,6 +31,7 @@ final class BackendProcess: ObservableObject {
         .appendingPathComponent("Library/Application Support/Arca")
 
     var isRunning: Bool { state == .running }
+    var processIdentifier: Int32? { process?.processIdentifier }
 
     private var terminationObserver: NSObjectProtocol?
 

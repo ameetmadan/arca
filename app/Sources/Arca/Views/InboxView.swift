@@ -14,6 +14,11 @@ struct InboxView: View {
     @State private var bulkThreshold = 0.9
     @State private var bulkBusy = false
 
+    init(pending: [Decision] = [], recent: [Decision] = []) {
+        _pending = State(initialValue: pending)
+        _recent = State(initialValue: recent)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -241,6 +246,7 @@ private struct PendingRow: View {
                 ProgressView().controlSize(.small)
             } else {
                 Button("Move", action: onMove)
+                    .accessibilityLabel("Move \(decision.fileName) to \(decision.target)")
                     .buttonStyle(.borderedProminent)
                     .disabled(decision.action != "move")
                 Menu {
@@ -253,8 +259,9 @@ private struct PendingRow: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .accessibilityLabel("More options")
+                .accessibilityLabel("More options for \(decision.fileName)")
                 Button("Skip", action: onSkip)
+                    .accessibilityLabel("Leave \(decision.fileName) where it is")
             }
         }
         .padding(.vertical, 4)
@@ -292,6 +299,7 @@ private struct RecentRow: View {
                 ProgressView().controlSize(.small)
             } else {
                 Button("Undo", action: onUndo)
+                    .accessibilityLabel("Undo move of \(decision.fileName)")
             }
         }
         .padding(.vertical, 2)

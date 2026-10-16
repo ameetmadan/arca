@@ -9,6 +9,17 @@ struct CalibrationView: View {
     @State private var error: String?
     @State private var position = 0
 
+    private let suppliedItems: [CalibrationItem]?
+    private let onAnswer: ((CalibrationItem, String) async throws -> Void)?
+
+    init(items: [CalibrationItem]? = nil,
+         onAnswer: ((CalibrationItem, String) async throws -> Void)? = nil) {
+        suppliedItems = items
+        self.onAnswer = onAnswer
+        _items = State(initialValue: items ?? [])
+        _loading = State(initialValue: items == nil)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Improve Suggestions").font(.title2.bold())
@@ -45,6 +56,7 @@ struct CalibrationView: View {
         .padding(28)
         .frame(width: 520, alignment: .leading)
         .task {
+            guard suppliedItems == nil else { return }
             do { items = try await APIClient.shared.calibration().items }
             catch { self.error = error.localizedDescription }
             loading = false
@@ -55,8 +67,12 @@ struct CalibrationView: View {
         busy = true
         defer { busy = false }
         do {
-            let decision = try await APIClient.shared.prepareCalibration(item)
-            _ = try await APIClient.shared.acceptDecision(id: decision.id, target: target)
+            if let onAnswer {
+                try await onAnswer(item, target)
+            } else {
+                let decision = try await APIClient.shared.prepareCalibration(item)
+                _ = try await APIClient.shared.acceptDecision(id: decision.id, target: target)
+            }
             position += 1
             error = nil
         } catch { self.error = error.localizedDescription }
