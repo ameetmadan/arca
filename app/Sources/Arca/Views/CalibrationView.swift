@@ -34,7 +34,7 @@ struct CalibrationView: View {
                 Text("Where does this belong?").font(.headline)
                 Text(item.file).textSelection(.enabled)
                 ForEach(Array(item.candidates.enumerated()), id: \.element.id) { index, candidate in
-                    Button(candidate.target) { Task { await answer(item, target: candidate.target) } }
+                    Button(candidate.target) { chooseCandidate(index) }
                         .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: [])
                         .accessibilityLabel("Move or confirm \(item.file) in \(candidate.target)")
                         .disabled(busy)
@@ -63,8 +63,17 @@ struct CalibrationView: View {
         }
     }
 
-    private func answer(_ item: CalibrationItem, target: String) async {
+    // Shortcut registrations can outlive a card's body evaluation. Resolve the
+    // current item when activated, rather than capturing the previously shown file.
+    private func chooseCandidate(_ index: Int) {
+        guard !busy, position < items.count else { return }
+        let item = items[position]
+        guard item.candidates.indices.contains(index) else { return }
         busy = true
+        Task { await answer(item, target: item.candidates[index].target) }
+    }
+
+    private func answer(_ item: CalibrationItem, target: String) async {
         defer { busy = false }
         do {
             if let onAnswer {

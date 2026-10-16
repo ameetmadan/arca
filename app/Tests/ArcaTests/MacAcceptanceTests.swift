@@ -85,7 +85,10 @@ final class MacAcceptanceTests: XCTestCase {
     private func host<V: View>(_ view: V, size: NSSize) -> NSWindow {
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.contentViewController = NSHostingController(rootView: view)
+        window.contentViewController = NSHostingController(rootView: view
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(nsColor: .windowBackgroundColor))
+            .preferredColorScheme(.light))
         window.setContentSize(size)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
