@@ -51,7 +51,7 @@ final class RuleEditorModel: ObservableObject {
 
     private var validationTask: Task<Void, Never>?
 
-    init(editing rule: Rule?) {
+    init(editing rule: Rule?, suggestion: RuleSuggestion? = nil) {
         if let rule = rule {
             mode = .edit(originalID: rule.id)
             id = rule.id
@@ -61,11 +61,11 @@ final class RuleEditorModel: ObservableObject {
             reason = rule.reason
         } else {
             mode = .create
-            id = ""
-            when = ""
+            id = suggestion?.id ?? ""
+            when = suggestion?.when ?? ""
             action = .move
-            target = ""
-            reason = ""
+            target = suggestion?.target ?? ""
+            reason = suggestion?.reason ?? ""
         }
     }
 

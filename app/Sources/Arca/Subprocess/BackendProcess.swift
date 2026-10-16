@@ -1,5 +1,6 @@
 import AppKit
 import Darwin
+import Security
 
 /// Runs the Go backend (`arca-server`) as a child process and reports whether
 /// it is usable.
@@ -30,6 +31,7 @@ final class BackendProcess: ObservableObject {
         .appendingPathComponent("Library/Application Support/Arca")
 
     var isRunning: Bool { state == .running }
+    var processIdentifier: Int32? { process?.processIdentifier }
 
     private var terminationObserver: NSObjectProtocol?
 
@@ -56,10 +58,7 @@ final class BackendProcess: ObservableObject {
                 if !(await APIClient.shared.isHealthy()) { break }
             }
             if await APIClient.shared.isHealthy() {
-                // Something else is serving the API (a server started by
-                // hand, for example). Use it rather than fail.
-                log("another Arca server is already running on port 44742; using it")
-                state = .running
+                state = .failed("Another server is using port 44742. Stop it before launching Arca.")
                 return
             }
         }
@@ -73,6 +72,16 @@ final class BackendProcess: ObservableObject {
         let p = Process()
         p.executableURL = binary
         p.arguments = ["-exit-with-parent"]
+        var random = [UInt8](repeating: 0, count: 32)
+        guard SecRandomCopyBytes(kSecRandomDefault, random.count, &random) == errSecSuccess else {
+            state = .failed("Could not create a secure backend session.")
+            return
+        }
+        let token = Data(random).base64EncodedString()
+        await APIClient.shared.setBearerToken(token)
+        var environment = ProcessInfo.processInfo.environment
+        environment["ARCA_API_TOKEN"] = token
+        p.environment = environment
         if let handle = openLog() {
             p.standardOutput = handle
             p.standardError = handle
@@ -97,13 +106,16 @@ final class BackendProcess: ObservableObject {
         // Wait for /health. Opening the databases takes well under a second;
         // allow more for a slow disk.
         for _ in 0..<150 {
+            guard process === p, p.isRunning, !stopping else { return }
             if await APIClient.shared.isHealthy() {
+                guard process === p, p.isRunning, !stopping else { return }
                 state = .running
                 return
             }
             guard process === p, p.isRunning else { return } // processExited reports it
             try? await Task.sleep(for: .milliseconds(200))
         }
+        await stop()
         state = .failed("Arca's background server did not respond. The log may say why.")
     }
 
@@ -115,13 +127,14 @@ final class BackendProcess: ObservableObject {
             state = .stopped
             return
         }
-        p.terminate() // SIGTERM: the server shuts down gracefully
+        if p.isRunning { p.terminate() } // SIGTERM: the server shuts down gracefully
         let deadline = Date().addingTimeInterval(12)
         while p.isRunning && Date() < deadline {
             try? await Task.sleep(for: .milliseconds(100))
         }
         if p.isRunning {
             kill(p.processIdentifier, SIGKILL)
+            p.waitUntilExit()
         }
         process = nil
         state = .stopped
@@ -144,6 +157,9 @@ final class BackendProcess: ObservableObject {
             usleep(50_000)
         }
         if p.isRunning { kill(p.processIdentifier, SIGKILL) }
+        p.waitUntilExit()
+        process = nil
+        state = .stopped
     }
 
     private func processExited(_ p: Process, status: Int32) {

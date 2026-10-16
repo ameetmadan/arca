@@ -100,14 +100,16 @@ final class RulesModelsTests: XCTestCase {
         XCTAssertEqual(b.evaluationError, "evaluation failed")
     }
 
-    func testSuggestionsEmptyAndOpaqueItems() throws {
+    func testSuggestionsEmptyAndTypedItems() throws {
         let empty = #"{ "data": { "suggestions": [] }, "error": null, "meta": { "timestamp": "t" } }"#
         let a = try RulesResponseDecoder.decode(RuleSuggestionList.self, from: data(empty), status: 200)
         XCTAssertTrue(a.suggestions.isEmpty)
 
-        let items = #"{ "data": { "suggestions": [ { "anything": 1 }, { "other": "x" } ] }, "error": null, "meta": {} }"#
+        let items = #"{ "data": { "suggestions": [ { "id": "correction-1", "root": "/r", "when": "Ext == \".txt\"", "action": "move", "target": "Notes", "reason": "3 corrections", "enabled": false, "count": 3 } ] }, "error": null, "meta": {} }"#
         let b = try RulesResponseDecoder.decode(RuleSuggestionList.self, from: data(items), status: 200)
-        XCTAssertEqual(b.suggestions.count, 2)
+        XCTAssertEqual(b.suggestions.count, 1)
+        XCTAssertFalse(b.suggestions[0].enabled)
+        XCTAssertEqual(b.suggestions[0].target, "Notes")
     }
 
     // MARK: Errors

@@ -141,7 +141,14 @@ func (s *server) submitSuggestions(ctx context.Context, root string, suggestions
 			sum.Skipped++
 			continue
 		}
-		res, err := s.decisions.Submit(ctx, root, sg.File, sg.Decision)
+		facts := decision.Facts{}
+		if s.app != nil && filepath.IsLocal(sg.File) {
+			builder := pipeline.FactsBuilder{Parser: s.app.Parser, Embed: s.app.EmbedProvider, Roots: []string{root}}
+			if built, err := builder.Build(ctx, filepath.Join(root, sg.File)); err == nil {
+				facts = built
+			}
+		}
+		res, err := s.decisions.SubmitWithFacts(ctx, root, sg.File, sg.Decision, facts)
 		if err != nil {
 			sum.Failed++
 			status, msg := classifyDecisionError(err, "")

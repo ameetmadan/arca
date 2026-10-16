@@ -8,6 +8,13 @@ final class APIModelsTests: XCTestCase {
         try JSONDecoder().decode(type, from: Data(json.utf8))
     }
 
+    func testCalibrationCandidates() throws {
+        let page = try decode(CalibrationPage.self, #"{"items":[{"root":"/r","file":"a.txt","margin":0.01,"candidates":[{"target":"Notes","score":0.8}]}]}"#)
+        XCTAssertEqual(page.items[0].id, "/r/a.txt")
+        XCTAssertEqual(page.items[0].candidates[0].target, "Notes")
+        XCTAssertEqual(page.items[0].margin, 0.01)
+    }
+
     func testChatEvents() {
         XCTAssertEqual(ChatEvent.parse(#"{"sources":[{"path":"/d/a.pdf","name":"a.pdf"}]}"#),
                        .sources([ChatSource(path: "/d/a.pdf", name: "a.pdf")]))

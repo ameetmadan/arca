@@ -7,6 +7,15 @@ actor APIClient {
 
     private let base = URL(string: "http://localhost:44742")!
     private let session: URLSession
+    private var bearerToken: String?
+
+    func setBearerToken(_ token: String) { bearerToken = token }
+
+    private func authenticated(_ request: URLRequest) -> URLRequest {
+        var request = request
+        if let bearerToken { request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization") }
+        return request
+    }
 
     private init() {
         let cfg = URLSessionConfiguration.default
@@ -25,7 +34,7 @@ actor APIClient {
     func isHealthy() async -> Bool {
         var req = URLRequest(url: base.appending(path: "/health"))
         req.timeoutInterval = 1
-        guard let (_, response) = try? await session.data(for: req) else { return false }
+        guard let (_, response) = try? await session.data(for: authenticated(req)) else { return false }
         return (response as? HTTPURLResponse)?.statusCode == 200
     }
 
@@ -119,6 +128,16 @@ actor APIClient {
             .replacingOccurrences(of: "=", with: "")
     }
 
+    func calibration() async throws -> CalibrationPage {
+        try await send(CalibrationPage.self, request(path: "/api/v1/calibration", method: "GET"))
+    }
+
+    func prepareCalibration(_ item: CalibrationItem) async throws -> Decision {
+        var req = request(path: "/api/v1/calibration/decisions", method: "POST")
+        req.httpBody = try JSONEncoder().encode(["root": item.root, "file": item.file])
+        return try await send(Decision.self, req)
+    }
+
     // MARK: - Tables
 
     func tables() async throws -> [TableInfo] {
@@ -182,7 +201,7 @@ actor APIClient {
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = body
-        let (data, response) = try await session.data(for: req)
+        let (data, response) = try await session.data(for: authenticated(req))
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         return try RulesResponseDecoder.decode(type, from: data, status: status)
     }
@@ -245,7 +264,8 @@ actor APIClient {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let (bytes, response) = try await session.bytes(from: url)
+                    let request = await authenticated(URLRequest(url: url))
+                    let (bytes, response) = try await session.bytes(for: request)
                     if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
                         throw APIError.http(http.statusCode)
                     }
@@ -277,7 +297,7 @@ actor APIClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: req)
+            (data, response) = try await session.data(for: authenticated(req))
         } catch {
             throw APIError.wrap(error)
         }
@@ -383,6 +403,12 @@ struct IndexStatus: Decodable, Equatable {
     let removed: Int
     let chunks: Int
     let stopped: String?
+    let finishedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case running, found, done, indexed, unchanged, failed, removed, chunks, stopped
+        case finishedAt = "finished_at"
+    }
 
     /// Files that are searchable after this scan.
     var searchable: Int { indexed + unchanged }
@@ -637,4 +663,18 @@ struct AnyCodable: Codable {
         case let v?: return "\(v)"
         }
     }
+}
+
+struct CalibrationPage: Decodable { let items: [CalibrationItem] }
+struct CalibrationItem: Decodable, Identifiable {
+    let root: String
+    let file: String
+    let candidates: [CalibrationCandidate]
+    let margin: Double
+    var id: String { root + "/" + file }
+}
+struct CalibrationCandidate: Decodable, Identifiable {
+    let target: String
+    let score: Double
+    var id: String { target }
 }

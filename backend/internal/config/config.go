@@ -10,9 +10,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	decisionstore "github.com/ameetmadan/arca/internal/decisions/sqlitestore"
 	"github.com/ameetmadan/arca/internal/executor"
 	"github.com/ameetmadan/arca/pkg/decision"
 	"github.com/ameetmadan/arca/pkg/decision/rules"
+	"github.com/ameetmadan/arca/pkg/decision/semantic"
 	"github.com/ameetmadan/arca/pkg/embed"
 	"github.com/ameetmadan/arca/pkg/embed/nomic"
 	"github.com/ameetmadan/arca/pkg/llm"
@@ -64,6 +66,8 @@ type File struct {
 
 // App holds all wired provider instances.
 type App struct {
+	Feedback      *decisionstore.Store
+	Folders       semantic.FolderStore
 	Cfg           *File
 	ConfigPath    string
 	LLMProvider   llm.LLMProvider
@@ -191,6 +195,7 @@ func Load(path string) (*App, error) {
 	app.Decision, app.Rules, app.Workers = dec.Engine, dec.Rules, dec.Workers
 	app.closers = append(app.closers, dec.Closers...)
 	app.RulesPath = dec.RulesPath
+	app.Feedback, app.Folders = dec.Feedback, dec.Folders
 
 	return app, nil
 }

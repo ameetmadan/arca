@@ -21,6 +21,7 @@ func (s *server) routesWith(logger *slog.Logger, limiter *rateLimiter) http.Hand
 	r.Use(recoverer(logger))
 	r.Use(securityHeaders)
 	r.Use(corsMiddleware)
+	r.Use(bearerAuth(s.apiToken))
 
 	r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
 		apiResponse(w, http.StatusNotFound, nil, "not found")
@@ -40,6 +41,8 @@ func (s *server) routesWith(logger *slog.Logger, limiter *rateLimiter) http.Hand
 		s.rulesRoutes(r)    // new in v1: no legacy /api alias
 		s.settingsRoutes(r) // new in v1: no legacy /api alias
 		s.tableRoutes(r)    // new in v1: no legacy /api alias
+		r.Get("/calibration", s.handleCalibration)
+		r.Post("/calibration/decisions", s.handleCalibrationPrepare)
 	})
 
 	// Deprecated: unversioned aliases kept for one release so an older Swift

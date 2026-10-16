@@ -37,7 +37,7 @@ func TestServerProcessExitsCleanlyOnSIGTERM(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cmd := exec.Command(bin, "-config", cfgPath)
+	cmd := exec.Command(bin, "--insecure-dev", "-config", cfgPath)
 	cmd.Env = append(os.Environ(), "HOME="+dir)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start: %v", err)

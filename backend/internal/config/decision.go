@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	decisionstore "github.com/ameetmadan/arca/internal/decisions/sqlitestore"
 	"github.com/ameetmadan/arca/internal/filefacts"
 	"github.com/ameetmadan/arca/internal/pipeline"
 	"github.com/ameetmadan/arca/pkg/decision"
@@ -45,7 +46,8 @@ const (
 // DecisionConfig is the optional `decision:` section. When it is absent, or
 // lists no engines, the chain is rules -> semantic -> llm with default thresholds.
 type DecisionConfig struct {
-	Engines []EngineConfig `yaml:"engines"`
+	SuggestionThreshold int            `yaml:"suggestion_threshold"`
+	Engines             []EngineConfig `yaml:"engines"`
 	// MaxPendingPerFolder is the backpressure limit: once a watched folder
 	// has more than this many decisions waiting in the queue, the watcher
 	// stops generating new ones for it. Zero or omitted means the default
@@ -79,6 +81,8 @@ type decisionDeps struct {
 
 // decisionWiring is what wireDecision builds.
 type decisionWiring struct {
+	Feedback *decisionstore.Store
+	Folders  semantic.FolderStore
 	// Engine is the composed chain.
 	Engine decision.Engine
 	// Steps are the chain's steps in order, for inspection and tests.
@@ -191,8 +195,18 @@ func wireSemantic(w *decisionWiring, cfg *File, deps decisionDeps) (decision.Eng
 		return nil, errors.New(`engine "semantic" needs an embedding provider, but none is configured`)
 	}
 	store := openFolderStore(w, deps.AppDir)
+	feedback, err := decisionstore.Open(filepath.Join(deps.AppDir, "decisions.db"))
+	var learned semantic.FolderStore = store
+	if err == nil {
+		w.Feedback = feedback
+		w.Closers = append(w.Closers, func() { feedback.Close() })
+		learned = &semantic.LearningStore{FolderStore: store, Feedback: feedback}
+	} else {
+		log.Print("decision: feedback unavailable; using base folder index")
+	}
+	w.Folders = learned
 	t := semantic.DefaultTunables()
-	eng, err := semantic.NewEngine(store, t)
+	eng, err := semantic.NewEngine(learned, t)
 	if err != nil {
 		return nil, err
 	}
