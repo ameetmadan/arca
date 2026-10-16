@@ -117,8 +117,8 @@ The backend reads its config from the default path below. Use `-config` to point
 else.
 
 ```sh
-backend/arca-server                      # uses the default config path
-backend/arca-server -config ./my.yaml    # uses a custom config file
+backend/arca-server --insecure-dev       # uses the default config path
+backend/arca-server --insecure-dev -config ./my.yaml    # uses a custom config file
 ```
 
 If the config file does not exist the server writes a default one (no models, no watched
@@ -254,3 +254,21 @@ backend/    Go backend
 docs/       architecture overview and ADRs
 dist/       output of `make dist`
 ```
+
+### Session security and learning
+
+The app generates a fresh in-memory bearer token on each backend launch. Manual development
+requires `--insecure-dev`, or `ARCA_API_TOKEN` in the environment and a matching Authorization
+header. Only `/health` is public; browser origins are rejected.
+
+Inbox supports bulk moves above a chosen confidence level. Automatic folder mode requires an
+explicit warning confirmation. Settings → Improve Suggestions opens optional calibration;
+skipping and opening it do not change files or feedback. Number keys choose candidates, S skips,
+and Escape closes the flow.
+
+Confirmed vectors and correction outcomes are committed together in `decisions.db`. The semantic
+engine overlays those examples on the folder index, preserving them across reindexing. Auto-mode
+eligibility uses the last 100 resolved decisions; changing the target counts as a miss. Repeated
+extension-to-folder corrections produce disabled rule suggestions after three corrections
+(configurable with `decision.suggestion_threshold`). Review suggestions before enabling them.
+See [learning and calibration](docs/api/learning.md) for details and limits.

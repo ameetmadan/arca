@@ -180,7 +180,12 @@ func RunContract(t *testing.T, newBackend func(t *testing.T) Backend) {
 		b := newBackend(t)
 		add := func(root string, st decisions.Status, n int) {
 			for i := 0; i < n; i++ {
-				if _, err := b.Insert(ctx, rec(root, "f.txt", st)); err != nil {
+				r := rec(root, "f.txt", st)
+				if st == decisions.StatusAccepted {
+					id := int64(1)
+					r.JournalID = &id
+				}
+				if _, err := b.Insert(ctx, r); err != nil {
 					t.Fatal(err)
 				}
 			}

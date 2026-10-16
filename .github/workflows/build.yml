@@ -91,9 +91,24 @@ jobs:
           echo "label=$label" >> "$GITHUB_OUTPUT"
           echo "version=${label%%-*}" >> "$GITHUB_OUTPUT"
 
-      - name: Swift tests
+      - name: Build backend for Swift acceptance tests
+        working-directory: backend
+        run: go build -o ../app/arca-server ./cmd/server
+
+      - name: Swift tests and native acceptance checks
         working-directory: app
+        env:
+          ARCA_ACCEPTANCE_TESTS: "1"
+          ARCA_SCREENSHOT_DIR: ${{ github.workspace }}/acceptance-screenshots
         run: swift test
+
+      - name: Upload native UI acceptance screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macOS-acceptance-screenshots
+          path: acceptance-screenshots/*.png
+          if-no-files-found: error
 
       # Same linkage as the app on macOS: proves sqlite-vec's vec0 module
       # registers against the SQLite compiled into the binary.
@@ -107,8 +122,8 @@ jobs:
       - name: Smoke-test the bundled backend
         run: |
           set -euo pipefail
-          home="$(mktemp -d)"
-          HOME="$home" dist/Arca.app/Contents/Resources/arca-server -exit-with-parent=false > server.log 2>&1 &
+          smoke_home="$(mktemp -d)"
+          HOME="$smoke_home" dist/Arca.app/Contents/Resources/arca-server --insecure-dev -exit-with-parent=false > server.log 2>&1 &
           pid=$!
           for _ in $(seq 1 60); do
             if curl -fsS http://localhost:44742/health >/dev/null; then break; fi
@@ -117,7 +132,7 @@ jobs:
           curl -fsS http://localhost:44742/health
           curl -fsS http://localhost:44742/api/v1/settings
           curl -fsS http://localhost:44742/api/v1/models
-          test -f "$home/Library/Application Support/Arca/config.yaml"
+          test -f "$smoke_home/Library/Application Support/Arca/config.yaml"
           kill "$pid"
           wait "$pid" || true
           cat server.log

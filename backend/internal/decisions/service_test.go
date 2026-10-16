@@ -521,3 +521,19 @@ func TestCountPending(t *testing.T) {
 		t.Fatalf("relative root: err = %v, want ErrInvalid", err)
 	}
 }
+
+func TestCalibrationConfirmationDoesNotMoveFile(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	result, err := e.svc.SubmitWithFacts(ctx, root, "Notes/a.txt", decision.Decision{Action: decision.AskUser, Target: "Notes", Source: "calibration"}, decision.Facts{Vector: []float32{1, 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := e.svc.Accept(ctx, result.Record.ID, "Notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(e.exec.calls) != 0 || rec.Status != decisions.StatusAccepted || rec.JournalID != nil {
+		t.Fatalf("confirmation moved file: %+v", rec)
+	}
+}

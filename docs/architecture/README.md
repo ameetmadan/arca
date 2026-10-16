@@ -191,3 +191,17 @@ flowchart TB
 | 3 | Semantic engine built from existing folders, local LLM fallback, in-process watcher pipeline, Inbox | 0006, 0007 |
 | 4 | Feedback loop, optional calibration, per-folder auto mode | 0007 |
 | later | Optional hosted decision provider (e.g. Jev), off by default | 0008 |
+
+## Session authentication and learning (2026-10-16)
+
+Each app backend launch generates 32 random bytes using Security.framework. The token stays
+in memory, travels to the child via `ARCA_API_TOKEN`, and is attached as a Bearer header to all
+HTTP and SSE requests. The backend compares fixed-length SHA-256 digests in constant time.
+Only `/health` is unauthenticated. Startup without a token requires explicit `--insecure-dev`;
+browser Origin requests are rejected. The app refuses to adopt an unrelated backend on its
+port. Quit sends SIGTERM, waits up to five seconds, then kills and reaps a stuck child.
+
+Feedback is transactionally persisted with decision resolution, and overlays the semantic
+folder index. Optional calibration and its read-only ranking are described in
+[learning.md](../api/learning.md). Auto eligibility now uses a rolling window, with target
+corrections counted as misses. The hosted-provider phase remains deferred.

@@ -55,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 struct RootView: View {
+    @State private var showCalibration = false
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var backend: BackendProcess
 
@@ -67,6 +68,13 @@ struct RootView: View {
             }
         }
         .frame(minWidth: 760, minHeight: 540)
+        .alert("Improve folder suggestions?", isPresented: $appState.offerCalibration) {
+            Button("Maybe Later", role: .cancel) {}
+            Button("Review a Few Files") { showCalibration = true }
+        } message: {
+            Text("Optional: confirm where a few uncertain files belong. You can also do this from Settings.")
+        }
+        .sheet(isPresented: $showCalibration) { CalibrationView() }
     }
 }
 

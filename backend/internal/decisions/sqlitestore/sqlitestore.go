@@ -11,6 +11,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -25,6 +26,13 @@ import (
 )
 
 const schema = `
+CREATE TABLE IF NOT EXISTS decision_inputs (id INTEGER PRIMARY KEY, vector BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS feedback (
+ id INTEGER PRIMARY KEY, root TEXT NOT NULL, file TEXT NOT NULL,
+ suggested TEXT NOT NULL, target TEXT NOT NULL, accepted INTEGER NOT NULL,
+ vector BLOB NOT NULL, resolved INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS feedback_file ON feedback(root,file,resolved);
 CREATE TABLE IF NOT EXISTS decisions (
 	id         INTEGER PRIMARY KEY AUTOINCREMENT,
 	ts         TEXT NOT NULL,
@@ -87,7 +95,12 @@ func (s *Store) Close() error { return s.db.Close() }
 
 // Insert implements decisions.Store.
 func (s *Store) Insert(ctx context.Context, r decisions.Record) (decisions.Record, error) {
-	res, err := s.db.ExecContext(ctx,
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return decisions.Record{}, err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx,
 		`INSERT INTO decisions (ts, root, file, action, target, confidence, reason, source, status, journal_id)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.TS.UTC().Format(timeLayout), r.Root, r.File, string(r.Action), r.Target, r.Confidence,
@@ -100,6 +113,16 @@ func (s *Store) Insert(ctx context.Context, r decisions.Record) (decisions.Recor
 		return decisions.Record{}, err
 	}
 	r.ID = id
+	vec, err := json.Marshal(r.Vector)
+	if err != nil {
+		return decisions.Record{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO decision_inputs(id,vector) VALUES (?,?)`, id, vec); err != nil {
+		return decisions.Record{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return decisions.Record{}, err
+	}
 	return r, nil
 }
 
@@ -193,8 +216,19 @@ func (s *Store) List(ctx context.Context, f decisions.ListFilter) (decisions.Pag
 
 // Transition implements decisions.Store.
 func (s *Store) Transition(ctx context.Context, id int64, from, to decisions.Status, u decisions.Update) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var originalTarget string
+	if err = tx.QueryRowContext(ctx, `SELECT target FROM decisions WHERE id=?`, id).Scan(&originalTarget); errors.Is(err, sql.ErrNoRows) {
+		return decisions.ErrNotFound
+	} else if err != nil {
+		return err
+	}
 	// COALESCE keeps the stored value when the update leaves a field nil.
-	res, err := s.db.ExecContext(ctx,
+	res, err := tx.ExecContext(ctx,
 		`UPDATE decisions
 		    SET status = ?, journal_id = COALESCE(?, journal_id), target = COALESCE(?, target)
 		  WHERE id = ? AND status = ?`,
@@ -207,10 +241,28 @@ func (s *Store) Transition(ctx context.Context, id int64, from, to decisions.Sta
 		return err
 	}
 	if n > 0 {
-		return nil
+		if to == decisions.StatusRejected || (to == decisions.StatusAccepted && (u.JournalID != nil || u.Resolved)) {
+			target := ""
+			accepted := 0
+			if to == decisions.StatusAccepted {
+				target = originalTarget
+				if u.Target != nil {
+					target = *u.Target
+				}
+				if target == originalTarget {
+					accepted = 1
+				}
+			}
+			_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO feedback(id,root,file,suggested,target,accepted,vector,resolved)
+    SELECT d.id,d.root,d.file,?,?,?,COALESCE(i.vector,'null'),? FROM decisions d LEFT JOIN decision_inputs i ON i.id=d.id WHERE d.id=?`, originalTarget, target, accepted, time.Now().UnixNano(), id)
+			if err != nil {
+				return err
+			}
+		}
+		return tx.Commit()
 	}
 	var one int
-	err = s.db.QueryRowContext(ctx, `SELECT 1 FROM decisions WHERE id = ?`, id).Scan(&one)
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM decisions WHERE id = ?`, id).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return decisions.ErrNotFound
 	}
@@ -257,8 +309,11 @@ func (s *Store) PutPolicy(ctx context.Context, root string, st policy.Settings) 
 func (s *Store) AcceptanceStats(ctx context.Context, root string) (policy.Stats, error) {
 	var st policy.Stats
 	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*), COALESCE(SUM(status = 'accepted'), 0)
-		   FROM decisions WHERE root = ? AND status IN ('accepted','rejected')`, root).
+		`SELECT COUNT(*), COALESCE(SUM(accepted),0) FROM (
+ SELECT CASE WHEN f.id IS NOT NULL THEN f.accepted ELSE d.status='accepted' END AS accepted
+ FROM decisions d LEFT JOIN feedback f ON f.id=d.id
+ WHERE d.root=? AND (d.status='rejected' OR (d.status='accepted' AND (d.journal_id IS NOT NULL OR f.id IS NOT NULL)))
+ ORDER BY COALESCE(f.resolved,0) DESC,d.id DESC LIMIT 100)`, root).
 		Scan(&st.Decided, &st.Accepted)
 	if err != nil {
 		return policy.Stats{}, fmt.Errorf("acceptance stats: %w", err)

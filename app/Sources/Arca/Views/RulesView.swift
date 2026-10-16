@@ -3,11 +3,13 @@ import SwiftUI
 /// What the editor sheet is opened for.
 enum RuleEditorTarget: Identifiable {
     case create
+    case suggestion(RuleSuggestion)
     case edit(Rule)
 
     var id: String {
         switch self {
         case .create: return "new-rule"
+        case .suggestion(let value): return value.id
         case .edit(let rule): return "edit-" + rule.id
         }
     }
@@ -65,6 +67,7 @@ struct RulesView: View {
         .sheet(item: $editorTarget) { target in
             RuleEditorView(
                 editing: target.rule,
+                suggestion: { if case .suggestion(let value) = target { return value }; return nil }(),
                 limits: store.limits,
                 watchedFolders: appState.watchedFolders
             ) { saved in
@@ -169,21 +172,23 @@ struct RulesView: View {
 
     // MARK: Suggestions
 
-    /// Hidden while the server has no suggestions (it never has any yet). Their
-    /// shape is not defined by the API, so there is nothing to accept or
-    /// dismiss yet; this only says that some exist.
     private var suggestionsSection: some View {
-        GroupBox("Suggested rules") {
-            Label(
-                store.suggestions.count == 1
-                    ? "1 rule is suggested. Reviewing suggestions is not available in this version."
-                    : "\(store.suggestions.count) rules are suggested. Reviewing suggestions is not available in this version.",
-                systemImage: "lightbulb"
-            )
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(4)
+        GroupBox("Suggested rules — inactive until saved") {
+            ScrollView {
+                ForEach(store.suggestions) { suggestion in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text("Move to \(suggestion.target)").fontWeight(.medium)
+                            Text("\(suggestion.count) corrections in \(suggestion.root)").font(.caption)
+                        }
+                        Spacer()
+                        Button("Review…") { editorTarget = .suggestion(suggestion) }
+                    }
+                }
+            }.frame(maxHeight: 100)
         }
     }
+
 }
 
 private struct RuleRow: View {

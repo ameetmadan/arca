@@ -49,7 +49,9 @@ func (s Status) Valid() bool {
 // explanation, never file contents.
 type Record struct {
 	ID int64
-	TS time.Time
+	// Vector is captured with the pending decision for transactional feedback.
+	Vector []float32
+	TS     time.Time
 	// Root is the absolute path of the watched folder.
 	Root string
 	// File is the path of the file relative to Root.
@@ -109,6 +111,8 @@ type Page struct {
 
 // Update lists the optional fields Transition changes along with the status.
 type Update struct {
+	// Resolved marks a calibration confirmation that needs no file move.
+	Resolved bool
 	// JournalID, if non-nil, is stored as the record's journal link.
 	JournalID *int64
 	// Target, if non-nil, replaces the stored target (used when the user
