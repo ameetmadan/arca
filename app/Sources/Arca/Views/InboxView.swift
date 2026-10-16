@@ -68,7 +68,10 @@ struct InboxView: View {
                 Text("90%+").tag(0.9)
                 Text("95%+").tag(0.95)
                 Text("100%").tag(1.0)
-            }.frame(width: 160)
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(width: 90)
             Button("Move Matching") { Task { await acceptMatching() } }
                 .disabled(bulkBusy || busyID != nil || matching.isEmpty)
             if let error {
