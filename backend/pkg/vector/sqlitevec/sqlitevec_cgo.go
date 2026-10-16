@@ -6,7 +6,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"sync"
 
 	vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
@@ -26,8 +29,11 @@ type SQLiteVecStore struct {
 	DBPath string
 	db     *sql.DB
 	mu     sync.Mutex
-	dim    int // set on first Upsert
+	dim    int // read from an existing vec_store on open, else set on first Upsert
 }
+
+// vecDimRe reads the dimension out of vec_store's CREATE statement.
+var vecDimRe = regexp.MustCompile(`float\[(\d+)\]`)
 
 func New(dbPath string) (*SQLiteVecStore, error) {
 	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL")
@@ -49,7 +55,35 @@ func New(dbPath string) (*SQLiteVecStore, error) {
 		return nil, fmt.Errorf("sqlitevec: create vec_meta: %w", err)
 	}
 
-	return &SQLiteVecStore{DBPath: dbPath, db: db}, nil
+	store := &SQLiteVecStore{DBPath: dbPath, db: db}
+	if err := store.loadSchema(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return store, nil
+}
+
+// loadSchema picks up the dimension of an existing vec_store, so search
+// works after a restart before anything new is indexed, and drops vectors
+// whose metadata row is gone (left behind by older versions).
+func (s *SQLiteVecStore) loadSchema() error {
+	var ddl string
+	err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE name = 'vec_store'`).Scan(&ddl)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("sqlitevec: read schema: %w", err)
+	}
+	m := vecDimRe.FindStringSubmatch(ddl)
+	if m == nil {
+		return fmt.Errorf("sqlitevec: cannot read the vector dimension from %q", ddl)
+	}
+	s.dim, _ = strconv.Atoi(m[1])
+	if _, err := s.db.Exec(`DELETE FROM vec_store WHERE rowid NOT IN (SELECT rowid FROM vec_meta)`); err != nil {
+		return fmt.Errorf("sqlitevec: drop orphaned vectors: %w", err)
+	}
+	return nil
 }
 
 func (s *SQLiteVecStore) Close() { s.db.Close() }
@@ -95,27 +129,22 @@ func (s *SQLiteVecStore) Upsert(_ context.Context, id string, embedding []float3
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	// vec0 doesn't support ON CONFLICT directly; delete then insert.
-	if _, err := tx.Exec(`DELETE FROM vec_store WHERE rowid = (
-		SELECT rowid FROM vec_meta WHERE id = ?)`, id); err != nil {
+	// vec_meta's rowid is the key both tables share: the vector is stored
+	// under the same rowid as its metadata, so the JOIN in Search can never
+	// pair a vector with another chunk's text.
+	var rowid int64
+	if err := tx.QueryRow(`INSERT INTO vec_meta(id, metadata) VALUES (?, ?)
+		ON CONFLICT(id) DO UPDATE SET metadata = excluded.metadata
+		RETURNING rowid`, id, string(metaJSON)).Scan(&rowid); err != nil {
+		return fmt.Errorf("sqlitevec: upsert meta: %w", err)
+	}
+	// vec0 has no upsert; replace the vector.
+	if _, err := tx.Exec(`DELETE FROM vec_store WHERE rowid = ?`, rowid); err != nil {
 		return fmt.Errorf("sqlitevec: delete old vec: %w", err)
 	}
-	res, err := tx.Exec(`INSERT INTO vec_store(embedding) VALUES (?)`, blob)
-	if err != nil {
+	if _, err := tx.Exec(`INSERT INTO vec_store(rowid, embedding) VALUES (?, ?)`, rowid, blob); err != nil {
 		return fmt.Errorf("sqlitevec: insert vec: %w", err)
 	}
-	rowid, _ := res.LastInsertId()
-
-	if _, err := tx.Exec(`INSERT INTO vec_meta(id, metadata) VALUES (?, ?)
-		ON CONFLICT(id) DO UPDATE SET metadata = excluded.metadata, rowid = ?`,
-		id, string(metaJSON), rowid); err != nil {
-		// Fallback for SQLite versions that don't support rowid in upsert.
-		if _, err2 := tx.Exec(`INSERT OR REPLACE INTO vec_meta(id, metadata) VALUES (?, ?)`,
-			id, string(metaJSON)); err2 != nil {
-			return fmt.Errorf("sqlitevec: upsert meta: %w", err2)
-		}
-	}
-
 	return tx.Commit()
 }
 
@@ -136,9 +165,8 @@ func (s *SQLiteVecStore) Search(_ context.Context, query []float32, topK int) ([
 		SELECT m.id, m.metadata, v.distance
 		FROM vec_store v
 		JOIN vec_meta m ON m.rowid = v.rowid
-		WHERE v.embedding MATCH ?
-		ORDER BY v.distance
-		LIMIT ?`, blob, topK)
+		WHERE v.embedding MATCH ? AND k = ?
+		ORDER BY v.distance`, blob, topK)
 	if err != nil {
 		return nil, fmt.Errorf("sqlitevec: search: %w", err)
 	}

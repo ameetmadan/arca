@@ -101,41 +101,27 @@ func (a *App) Close() {
 	}
 }
 
-// PersistModelPaths rewrites config.yaml with updated LLM and embed model paths.
+// PersistModelPaths rewrites config.yaml with updated LLM and embed model
+// paths. An empty path leaves that entry unchanged.
 func (a *App) PersistModelPaths(llmPath, embedPath string) error {
 	if a.ConfigPath == "" {
 		return nil
 	}
-	data, err := os.ReadFile(a.ConfigPath)
-	if err != nil {
-		return err
-	}
-	var raw map[string]interface{}
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	home, _ := os.UserHomeDir()
-	tilde := func(p string) string {
-		if filepath.HasPrefix(p, home) {
-			return "~" + p[len(home):]
+	return a.rewrite(func(raw map[string]interface{}) {
+		set := func(section, path string) {
+			if path == "" {
+				return
+			}
+			m, ok := raw[section].(map[string]interface{})
+			if !ok {
+				m = map[string]interface{}{}
+				raw[section] = m
+			}
+			m["model_path"] = tildePath(path)
 		}
-		return p
-	}
-	if llmPath != "" {
-		if llm, ok := raw["llm"].(map[string]interface{}); ok {
-			llm["model_path"] = tilde(llmPath)
-		}
-	}
-	if embedPath != "" {
-		if emb, ok := raw["embed"].(map[string]interface{}); ok {
-			emb["model_path"] = tilde(embedPath)
-		}
-	}
-	out, err := yaml.Marshal(raw)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(a.ConfigPath, out, 0o644)
+		set("llm", llmPath)
+		set("embed", embedPath)
+	})
 }
 
 func Load(path string) (*App, error) {
@@ -154,6 +140,14 @@ func Load(path string) (*App, error) {
 	}
 
 	expandPaths(&cfg)
+	applyPathDefaults(&cfg, filepath.Dir(path))
+	for _, db := range []string{cfg.Vector.DBPath, cfg.SQL.DBPath} {
+		if dir := filepath.Dir(db); db != "" {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return nil, fmt.Errorf("config: create %s: %w", dir, err)
+			}
+		}
+	}
 
 	app := &App{Cfg: &cfg, ConfigPath: path}
 
@@ -199,6 +193,17 @@ func Load(path string) (*App, error) {
 	app.RulesPath = dec.RulesPath
 
 	return app, nil
+}
+
+// applyPathDefaults puts databases that are not configured next to
+// config.yaml rather than in the working directory.
+func applyPathDefaults(cfg *File, appDir string) {
+	if cfg.Vector.DBPath == "" {
+		cfg.Vector.DBPath = filepath.Join(appDir, "vectors.db")
+	}
+	if cfg.SQL.DBPath == "" {
+		cfg.SQL.DBPath = filepath.Join(appDir, "tables.duckdb")
+	}
 }
 
 func expandPaths(cfg *File) {

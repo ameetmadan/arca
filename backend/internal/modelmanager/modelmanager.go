@@ -20,7 +20,21 @@ type Model struct {
 	URL    string  `json:"url"`
 	SHA256 string  `json:"sha256"`
 	SizeGB float64 `json:"size_gb"`
+	// Kind is KindLLM or KindEmbedding. The app offers only LLMs as a
+	// choice; the embedding model is always downloaded alongside.
+	Kind string `json:"kind"`
+	// Description is one sentence the app shows next to the name.
+	Description string `json:"description"`
 }
+
+// Model kinds.
+const (
+	KindLLM       = "llm"
+	KindEmbedding = "embedding"
+)
+
+// EmbeddingModelID is the embedding model every LLM choice needs.
+const EmbeddingModelID = "nomic-embed"
 
 // ProgressEvent is streamed as SSE during download.
 type ProgressEvent struct {
@@ -37,26 +51,32 @@ type ProgressEvent struct {
 // mismatch. To bump a model, update the revision and hash together.
 var AvailableModels = []Model{
 	{
-		ID:     "llama32-3b",
-		Name:   "Llama 3.2 3B Instruct",
-		URL:    "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/5ab33fa94d1d04e903623ae72c95d1696f09f9e8/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-		SHA256: "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff",
-		SizeGB: 2.0,
+		ID:          "llama32-3b",
+		Name:        "Llama 3.2 3B Instruct",
+		URL:         "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/5ab33fa94d1d04e903623ae72c95d1696f09f9e8/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+		SHA256:      "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff",
+		SizeGB:      2.0,
+		Kind:        KindLLM,
+		Description: "Meta's small instruct model. Good all-rounder for English documents.",
 	},
 	{
-		ID:     "qwen25-3b",
-		Name:   "Qwen 2.5 3B Instruct",
-		URL:    "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/7dabda4d13d513e3e842b20f0d435c732f172cbe/qwen2.5-3b-instruct-q4_k_m.gguf",
-		SHA256: "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d",
-		SizeGB: 1.9,
+		ID:          "qwen25-3b",
+		Name:        "Qwen 2.5 3B Instruct",
+		URL:         "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/7dabda4d13d513e3e842b20f0d435c732f172cbe/qwen2.5-3b-instruct-q4_k_m.gguf",
+		SHA256:      "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d",
+		SizeGB:      1.9,
+		Kind:        KindLLM,
+		Description: "Alibaba's small instruct model. Strong at tables, SQL and non-English text.",
 	},
 	// Embedding model — downloaded automatically alongside any LLM choice.
 	{
-		ID:     "nomic-embed",
-		Name:   "Nomic Embed Text v1.5 (embeddings)",
-		URL:    "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/0188c9bf409793f810680a5a431e7b899c46104c/nomic-embed-text-v1.5.Q4_K_M.gguf",
-		SHA256: "d4e388894e09cf3816e8b0896d81d265b55e7a9fff9ab03fe8bf4ef5e11295ac",
-		SizeGB: 0.08,
+		ID:          "nomic-embed",
+		Name:        "Nomic Embed Text v1.5 (embeddings)",
+		URL:         "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/0188c9bf409793f810680a5a431e7b899c46104c/nomic-embed-text-v1.5.Q4_K_M.gguf",
+		SHA256:      "d4e388894e09cf3816e8b0896d81d265b55e7a9fff9ab03fe8bf4ef5e11295ac",
+		SizeGB:      0.08,
+		Kind:        KindEmbedding,
+		Description: "Turns text into vectors for search. Downloaded automatically.",
 	},
 }
 
@@ -69,6 +89,31 @@ func New(dir string) *Manager {
 }
 
 func (m *Manager) ModelsDir() string { return m.Dir }
+
+// Lookup returns the model with the given id.
+func Lookup(id string) (Model, bool) {
+	for _, mod := range AvailableModels {
+		if mod.ID == id {
+			return mod, true
+		}
+	}
+	return Model{}, false
+}
+
+// IDForPath returns the id of the model whose file is at path in m.Dir, or ""
+// when path is not one of the known model files.
+func (m *Manager) IDForPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	clean := filepath.Clean(path)
+	for _, mod := range AvailableModels {
+		if m.modelPath(mod.ID) == clean {
+			return mod.ID
+		}
+	}
+	return ""
+}
 
 func (m *Manager) IsPresent(modelID string) bool {
 	_, err := os.Stat(m.modelPath(modelID))

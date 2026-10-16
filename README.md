@@ -26,6 +26,21 @@ The models the backend can download (see `backend/internal/modelmanager/modelman
 > Model URLs are pinned to a Hugging Face commit and every download is verified against a SHA256;
 > a mismatch (or a model with no hash) fails the download and removes the partial file.
 
+## Install
+
+Download the latest zip from [Releases](https://github.com/ameetmadan/arca/releases), unzip it,
+and move **Arca.app** to Applications. Builds are ad-hoc signed, not notarized, so clear the
+quarantine flag once (`xattr -dr com.apple.quarantine /Applications/Arca.app`) or use **System
+Settings → Privacy & Security → Open Anyway**. On first launch Arca walks you through choosing
+folders and downloading a model. [docs/TESTING.md](docs/TESTING.md) is a guided tour.
+
+## Releasing
+
+CI (`.github/workflows/build.yml`) builds and smoke-tests `Arca.app` on every pull request and
+push to `main`. To publish a release, push a tag: `git tag v0.1.0 && git push origin v0.1.0`
+(a tag with a suffix such as `v0.1.0-beta.1` becomes a pre-release). The workflow attaches the
+zip and uses [docs/release-notes.md](docs/release-notes.md) as the notes.
+
 ## Documentation
 
 - [Architecture overview and diagrams](docs/architecture/README.md)
@@ -53,8 +68,8 @@ All commands run from the repository root.
 | `make llama-build` | Builds the llama.cpp static libraries (Metal enabled, arm64) | macOS only |
 | `make backend-stub` | Builds `backend/arca-server` without CGo, using stub providers | Any |
 | `make backend` | Builds `backend/arca-server` with llama.cpp, sqlite-vec, and DuckDB linked in | macOS only |
-| `make bundle` | Runs `make backend`, then copies the binary to `app/Sources/Arca/Resources/arca-server` | macOS only |
-| `make dist` | Runs `make bundle`, builds the Swift app in release mode, and assembles an ad-hoc signed `dist/Arca.app` | macOS only |
+| `make bundle` | Runs `make backend`, then copies the binary to `app/arca-server` so `swift run` from `app/` finds it | macOS only |
+| `make dist` | Runs `make backend`, builds the Swift app in release mode, and assembles an ad-hoc signed `dist/Arca.app`. `VERSION=1.2.3` stamps the version | macOS only |
 | `make clean` | Removes the built backend binaries and `dist/` | Any |
 
 ### 1. Build llama.cpp (macOS only, once)
@@ -83,7 +98,7 @@ make backend
 
 Both write `backend/arca-server`.
 
-> Note: `backend/arca-server`, `app/Sources/Arca/Resources/arca-server` and `dist/` are build
+> Note: `backend/arca-server`, `app/arca-server` and `dist/` are build
 > outputs and are git-ignored. `make clean` removes them.
 
 ### 3. Build the app (macOS only)
@@ -93,8 +108,8 @@ make dist
 open dist/Arca.app
 ```
 
-The app starts the bundled `arca-server` as a subprocess when it launches. You still need a
-`config.yaml` (see below) before the backend can start.
+The app starts the bundled `arca-server` as a subprocess (with `-exit-with-parent`, so it never
+outlives the app) and writes its output to `~/Library/Logs/Arca/arca-server.log`.
 
 ### Running the backend by hand
 
@@ -106,8 +121,8 @@ backend/arca-server                      # uses the default config path
 backend/arca-server -config ./my.yaml    # uses a custom config file
 ```
 
-If the config file does not exist the server exits with a "load config" error, so create one first
-(see below). On start it also creates `~/Library/Application Support/Arca/` and its `models/`
+If the config file does not exist the server writes a default one (no models, no watched
+folders). On start it also creates `~/Library/Application Support/Arca/` and its `models/`
 subfolder.
 
 ## Configuration
@@ -118,9 +133,10 @@ The default config path is:
 ~/Library/Application Support/Arca/config.yaml
 ```
 
-Nothing creates this file for you yet, so write it yourself. A complete example, with the values
-shown being the ones the backend uses when a field is omitted or the one provider that is
-implemented for each slot:
+The server creates it on first start, and the app updates the model paths and watched folders
+(through `PUT /api/v1/settings/folders` and `POST /api/v1/models/activate`). A complete example,
+with the values shown being the ones the backend uses when a field is omitted or the one provider
+that is implemented for each slot:
 
 ```yaml
 # Local HTTP port. The Swift app expects 44742 (the default if omitted).
@@ -191,6 +207,21 @@ decision:
 - The semantic engine learns from the sub-folders of `watcher.folders` in the background after
   each start, so it has nothing to go on until that has finished.
 
+### Indexing
+
+The watcher only sees changes, so the server also scans the watched folders at start and on
+`POST /api/v1/index/rescan`: supported files (`.pdf`, `.docx`, `.xlsx`, `.md`, `.txt`, `.csv`)
+whose size or modification time changed are indexed, and files that disappeared are removed from
+the index. Progress is at `GET /api/v1/index/status`; what was indexed is remembered in
+`index-state.json` next to the config.
+
+### Table Chat
+
+`POST /api/v1/tables/import` loads a `.csv`, `.tsv`, `.xlsx` (one table per sheet), `.parquet`
+or `.json` file into DuckDB; `GET /api/v1/tables` lists them. The SQL the LLM writes must be a
+single read-only `SELECT`; anything that writes, touches files or URLs, or loads extensions is
+refused. DuckDB's extension auto-install is off.
+
 ## Tests
 
 The Go tests run without CGo. The CGo-backed providers (`llamacpp`, `nomic`, `sqlitevec`,
@@ -202,8 +233,15 @@ cd backend
 go test ./...
 ```
 
-Tests use fake providers and temporary directories, so they need no real models. Don't rely on
-the CGo/Metal build in tests.
+Tests use fake providers and temporary directories, so they need no real models. The sqlite-vec
+and DuckDB providers have integration tests behind their tags; they need a C compiler (and
+`sqlite3.h`, e.g. `libsqlite3-dev` on Linux) but no models:
+
+```sh
+go test -tags sqlitevec,duckdb ./...
+```
+
+Swift model/decoding tests: `cd app && swift test` (macOS).
 
 ## Project layout
 
@@ -211,7 +249,7 @@ the CGo/Metal build in tests.
 app/        SwiftUI shell (File Sorter, Document Chat, Table Chat, Settings, onboarding)
 backend/    Go backend
   cmd/server/   HTTP server (chi router)
-  internal/     config (provider wiring), sorter, watcher, modelmanager
+  internal/     config (provider wiring), scan, sorter, watcher, modelmanager, decisions, executor
   pkg/          provider interfaces and implementations: llm, embed, vector, sqlengine, parser
 docs/       architecture overview and ADRs
 dist/       output of `make dist`

@@ -1,116 +1,130 @@
 import SwiftUI
+import AppKit
 
+/// Proposes sub-folders for the loose files in one folder, grouping files
+/// with similar content. The user picks which moves to make.
 struct FileSorterView: View {
+    @EnvironmentObject private var appState: AppState
     @State private var folderPath: String = ""
     @State private var moves: [SortMove] = []
+    @State private var selected: Set<SortMove> = []
     @State private var isAnalysing = false
     @State private var isApplying = false
     @State private var applyResult: String?
     @State private var error: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("File Sorter")
-                .font(.title2)
-                .fontWeight(.semibold)
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Tidy a Folder").font(.title2.bold())
+                Text("Arca reads the loose files in a folder and proposes sub-folders for files that belong together. Files already in sub-folders are left alone. You choose which moves to make; Arca never overwrites an existing file.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             HStack {
-                TextField("Folder path", text: $folderPath)
-                    .textFieldStyle(.roundedBorder)
+                Menu {
+                    ForEach(appState.watchedFolderPaths, id: \.self) { path in
+                        Button(path) { choose(path) }
+                    }
+                    if !appState.watchedFolderPaths.isEmpty { Divider() }
+                    Button("Other Folder…") { pickFolder() }
+                } label: {
+                    Label(folderPath.isEmpty ? "Choose a Folder" : (folderPath as NSString).lastPathComponent,
+                          systemImage: "folder")
+                }
+                .fixedSize()
 
-                Button("Browse") { pickFolder() }
-
-                Button("Analyse") {
+                if !folderPath.isEmpty {
+                    Text(folderPath)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
+                Spacer()
+                Button(isAnalysing ? "Analysing…" : "Suggest Folders") {
                     Task { await analyse() }
                 }
-                .disabled(folderPath.isEmpty || isAnalysing)
+                .buttonStyle(.borderedProminent)
+                .disabled(folderPath.isEmpty || isAnalysing || isApplying)
             }
 
             if isAnalysing {
-                ProgressView("Analysing folder…")
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text("Reading files and naming groups. This can take a minute.")
+                        .foregroundStyle(.secondary)
+                }
             } else if let err = error {
-                Text(err).foregroundStyle(.red).font(.caption)
-            } else if !moves.isEmpty {
-                movesTable
-                applyBar
-            } else {
-                ContentUnavailableView("Select a folder to get sorting suggestions",
-                                       systemImage: "folder.badge.questionmark")
+                Label(err, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
+            } else if let result = applyResult, moves.isEmpty {
+                Label(result, systemImage: "checkmark.circle.fill").foregroundStyle(.green)
             }
 
-            Spacer()
+            if !moves.isEmpty {
+                movesTable
+                applyBar
+            } else if !isAnalysing {
+                ContentUnavailableView("Choose a folder to get suggestions",
+                                       systemImage: "folder.badge.questionmark")
+                    .frame(maxHeight: .infinity)
+            }
         }
-        .padding()
-        .frame(minWidth: 540, minHeight: 420)
+        .padding(16)
     }
 
     // MARK: - Subviews
 
     private var movesTable: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("File").fontWeight(.semibold).frame(maxWidth: .infinity, alignment: .leading)
-                Text("Move to").fontWeight(.semibold).frame(width: 200, alignment: .leading)
+        Table(moves) {
+            TableColumn("") { move in
+                Toggle("", isOn: Binding(
+                    get: { selected.contains(move) },
+                    set: { on in if on { selected.insert(move) } else { selected.remove(move) } }
+                ))
+                .labelsHidden()
+                .accessibilityLabel("Move \(move.file)")
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(Color(nsColor: .controlBackgroundColor))
-
-            Divider()
-
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(Array(moves.enumerated()), id: \.offset) { idx, move in
-                        HStack {
-                            Text(move.file)
-                                .font(.body.monospaced())
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Image(systemName: "arrow.right")
-                                .foregroundStyle(.secondary)
-                                .font(.caption)
-                            Text(move.suggestedFolder)
-                                .font(.body.monospaced())
-                                .foregroundStyle(Color.accentColor)
-                                .lineLimit(1)
-                                .frame(width: 200, alignment: .leading)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .background(idx % 2 == 0 ? Color.clear : Color(nsColor: .controlBackgroundColor).opacity(0.4))
-                    }
-                }
+            .width(24)
+            TableColumn("File") { move in
+                Text(move.file).lineLimit(1).truncationMode(.middle)
             }
-            .background(Color(nsColor: .textBackgroundColor))
+            TableColumn("Move to") { move in
+                Label(move.suggestedFolder, systemImage: "folder")
+                    .foregroundStyle(Color.accentColor)
+            }
+            .width(min: 140, ideal: 200)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor), lineWidth: 1))
+        .frame(minHeight: 200)
     }
 
     private var applyBar: some View {
         HStack {
-            Text("\(moves.count) moves suggested")
+            Button(selected.count == moves.count ? "Select None" : "Select All") {
+                selected = selected.count == moves.count ? [] : Set(moves)
+            }
+            Text("\(selected.count) of \(moves.count) selected")
                 .foregroundStyle(.secondary)
                 .font(.caption)
-
             Spacer()
-
-            if let result = applyResult {
-                Text(result)
-                    .foregroundStyle(.secondary)
-                    .font(.caption)
-            }
-
-            Button(isApplying ? "Applying…" : "Apply All") {
+            Button(isApplying ? "Moving…" : "Move \(selected.count) File\(selected.count == 1 ? "" : "s")") {
                 Task { await apply() }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(isApplying)
+            .disabled(isApplying || selected.isEmpty)
         }
     }
 
     // MARK: - Actions
+
+    private func choose(_ path: String) {
+        folderPath = path
+        moves = []
+        selected = []
+        applyResult = nil
+        error = nil
+    }
 
     private func pickFolder() {
         let panel = NSOpenPanel()
@@ -118,10 +132,7 @@ struct FileSorterView: View {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
-            folderPath = url.path
-            moves = []
-            applyResult = nil
-            error = nil
+            choose(url.path)
         }
     }
 
@@ -133,6 +144,10 @@ struct FileSorterView: View {
         do {
             let result = try await APIClient.shared.sort(folder: folderPath)
             moves = result.moves
+            selected = Set(result.moves)
+            if moves.isEmpty {
+                applyResult = "Nothing to tidy: there are no loose documents Arca can read in this folder."
+            }
         } catch {
             self.error = error.localizedDescription
         }
@@ -141,12 +156,23 @@ struct FileSorterView: View {
     private func apply() async {
         isApplying = true
         defer { isApplying = false }
+        let chosen = moves.filter { selected.contains($0) }
         do {
-            let result = try await APIClient.shared.applySort(folder: folderPath, moves: moves)
-            applyResult = "✓ \(result.applied) moved, \(result.skipped) skipped"
+            let result = try await APIClient.shared.applySort(folder: folderPath, moves: chosen)
+            var text = "Moved \(result.applied) file\(result.applied == 1 ? "" : "s")"
+            if result.skipped > 0 { text += ", skipped \(result.skipped)" }
+            if let errors = result.errors, !errors.isEmpty {
+                error = errors.joined(separator: "\n")
+            }
+            applyResult = text + "."
             moves = []
+            selected = []
         } catch {
             self.error = error.localizedDescription
         }
     }
+}
+
+extension SortMove: Identifiable {
+    var id: String { file }
 }

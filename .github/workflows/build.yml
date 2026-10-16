@@ -1,0 +1,153 @@
+# Builds and tests Arca. The macOS job produces dist/Arca.app as a zip; on a
+# v* tag it also publishes that zip as a GitHub Release.
+#
+# The repository is private, so macOS minutes are billed at a premium: the
+# macOS job runs on pull requests, version tags, pushes to main and manual
+# dispatch only, and the llama.cpp build is cached by version.
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Pinned llama.cpp release. The CGo code in backend/pkg/{llm,embed} uses
+  # llama.h directly, so bump this deliberately and re-test.
+  LLAMA_CPP_REF: v0.6.0
+  MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+jobs:
+  backend-test:
+    name: Backend tests (no CGo providers)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: go vet
+        working-directory: backend
+        run: go vet ./...
+      - name: go test
+        working-directory: backend
+        run: go test -race ./...
+      # The SQLite and DuckDB providers link prebuilt or vendored C code, so
+      # their integration tests run here too; llama.cpp is covered on macOS.
+      - name: go test (sqlite-vec, DuckDB)
+        working-directory: backend
+        run: |
+          sudo apt-get install -y --no-install-recommends libsqlite3-dev
+          go test -tags sqlitevec,duckdb ./...
+
+  macos:
+    name: macOS app (Apple Silicon)
+    runs-on: macos-15
+    timeout-minutes: 60
+    permissions:
+      contents: write # create the release on tags
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Cache llama.cpp build
+        id: llama-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/llama.cpp
+          key: llama-cpp-${{ env.LLAMA_CPP_REF }}-macos15-arm64-${{ hashFiles('Makefile') }}
+
+      - name: Build llama.cpp
+        if: steps.llama-cache.outputs.cache-hit != 'true'
+        run: |
+          rm -rf ~/llama.cpp
+          git clone --depth 1 --branch "$LLAMA_CPP_REF" https://github.com/ggml-org/llama.cpp ~/llama.cpp
+          make llama-build
+
+      - name: Version
+        id: version
+        run: |
+          # CFBundleShortVersionString must be numeric (1.2.3), so a
+          # pre-release suffix only goes into the file name.
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            label="${GITHUB_REF_NAME#v}"
+          else
+            label="0.0.0-dev-${GITHUB_SHA::7}"
+          fi
+          echo "label=$label" >> "$GITHUB_OUTPUT"
+          echo "version=${label%%-*}" >> "$GITHUB_OUTPUT"
+
+      - name: Swift tests
+        working-directory: app
+        run: swift test
+
+      # Same linkage as the app on macOS: proves sqlite-vec's vec0 module
+      # registers against the SQLite compiled into the binary.
+      - name: Go provider tests (sqlite-vec, DuckDB) on macOS
+        working-directory: backend
+        run: go test -tags sqlitevec,duckdb ./pkg/vector/... ./pkg/sqlengine/...
+
+      - name: Build Arca.app
+        run: make dist VERSION="${{ steps.version.outputs.version }}" BUILD_NUMBER="${{ github.run_number }}"
+
+      - name: Smoke-test the bundled backend
+        run: |
+          set -euo pipefail
+          home="$(mktemp -d)"
+          HOME="$home" dist/Arca.app/Contents/Resources/arca-server -exit-with-parent=false > server.log 2>&1 &
+          pid=$!
+          for _ in $(seq 1 60); do
+            if curl -fsS http://localhost:44742/health >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://localhost:44742/health
+          curl -fsS http://localhost:44742/api/v1/settings
+          curl -fsS http://localhost:44742/api/v1/models
+          test -f "$home/Library/Application Support/Arca/config.yaml"
+          kill "$pid"
+          wait "$pid" || true
+          cat server.log
+
+      - name: Package
+        id: package
+        run: |
+          zip="Arca-${{ steps.version.outputs.label }}-macOS-arm64.zip"
+          ditto -c -k --sequesterRsrc --keepParent dist/Arca.app "$zip"
+          shasum -a 256 "$zip" > "$zip.sha256"
+          echo "zip=$zip" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Arca-macOS-arm64
+          path: |
+            ${{ steps.package.outputs.zip }}
+            ${{ steps.package.outputs.zip }}.sha256
+          retention-days: 14
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease="--prerelease"; fi
+          sed "s/{{TAG}}/$GITHUB_REF_NAME/g" docs/release-notes.md > release-notes.md
+          gh release create "$GITHUB_REF_NAME" \
+            "${{ steps.package.outputs.zip }}" "${{ steps.package.outputs.zip }}.sha256" \
+            --title "Arca $GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            $prerelease
