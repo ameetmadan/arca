@@ -66,15 +66,29 @@ struct FileSorterView: View {
                 movesTable
                 applyBar
             } else if !isAnalysing {
-                ContentUnavailableView("Choose a folder to get suggestions",
-                                       systemImage: "folder.badge.questionmark")
-                    .frame(maxHeight: .infinity)
+                emptyState
             }
         }
         .padding(16)
     }
 
     // MARK: - Subviews
+
+    /// Not a ContentUnavailableView: that view is meant to fill its whole
+    /// container, and as a sibling in this VStack it painted over the header,
+    /// the folder picker and the sidebar.
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "folder.badge.questionmark")
+                .font(.system(size: 40))
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+            Text(folderPath.isEmpty ? "Choose a folder to get suggestions" : "Choose Suggest Folders to see proposed moves")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
 
     private var movesTable: some View {
         Table(moves) {
