@@ -26,6 +26,11 @@ The models the backend can download (see `backend/internal/modelmanager/modelman
 > Model URLs are pinned to a Hugging Face commit and every download is verified against a SHA256;
 > a mismatch (or a model with no hash) fails the download and removes the partial file.
 
+Arca does not bundle or redistribute these models; it downloads them from Hugging Face on your
+request. Each model has its own license (for example the Llama 3.2 Community License and the
+Qwen license), which is separate from Arca's license and governs how you may use the model. Read
+the terms on each model's Hugging Face page before use, especially for commercial purposes.
+
 ## Install
 
 Download the latest zip from [Releases](https://github.com/ameetmadan/arca/releases), unzip it,
@@ -45,6 +50,8 @@ zip and uses [docs/release-notes.md](docs/release-notes.md) as the notes.
 
 - [Architecture overview and diagrams](docs/architecture/README.md)
 - [Architecture decision records (ADRs)](docs/adr/README.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
 
 ## Prerequisites
 
@@ -52,11 +59,11 @@ Building the full app needs **macOS on Apple Silicon** with:
 
 - macOS 14 or later (the Swift package targets `.macOS(.v14)`)
 - Xcode with the Swift toolchain (the app is built with `swift build`)
-- Go 1.25 or later (`backend/go.mod`)
+- Go 1.26 or later (`backend/go.mod`)
 - CMake (to build llama.cpp)
 - A llama.cpp checkout at `~/llama.cpp`
 
-Building and testing only the Go backend without CGo needs just Go 1.25+ and works on any
+Building and testing only the Go backend without CGo needs just Go 1.26+ and works on any
 platform.
 
 ## Build and run
@@ -272,3 +279,10 @@ eligibility uses the last 100 resolved decisions; changing the target counts as 
 extension-to-folder corrections produce disabled rule suggestions after three corrections
 (configurable with `decision.suggestion_threshold`). Review suggestions before enabling them.
 See [learning and calibration](docs/api/learning.md) for details and limits.
+
+## License
+
+Arca is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only).
+If you distribute a modified version, or let others interact with one over a network, you must
+make the corresponding source available under the same license. Third-party components keep
+their own (permissive) licenses.
