@@ -49,6 +49,19 @@ struct ArcaApp: App {
 /// Quits the app when its window closes. (The backend stops itself on
 /// NSApplication.willTerminateNotification; see BackendProcess.)
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Run from Xcode or `swift run`, the binary is not inside an .app bundle,
+    /// so macOS starts it as a background process with no window or Dock icon.
+    /// Promote it to a regular app. This is a no-op for the packaged Arca.app.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        if Bundle.main.bundlePath.hasSuffix(".app") { return }
+        NSApp.setActivationPolicy(.regular)
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        if Bundle.main.bundlePath.hasSuffix(".app") { return }
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }
@@ -79,14 +92,15 @@ struct RootView: View {
 }
 
 enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
-    case inbox, sorter, documents, tables
+    // Tidy a Folder (FileSorterView) is hidden for now: it rendered a blank
+    // window in testing. Removing the case also resets any saved selection.
+    case inbox, documents, tables
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .inbox: return "Inbox"
-        case .sorter: return "Tidy a Folder"
         case .documents: return "Ask Documents"
         case .tables: return "Ask Spreadsheets"
         }
@@ -95,7 +109,6 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
     var systemImage: String {
         switch self {
         case .inbox: return "tray.full"
-        case .sorter: return "folder.badge.gearshape"
         case .documents: return "doc.text.magnifyingglass"
         case .tables: return "tablecells"
         }
@@ -137,7 +150,6 @@ struct MainView: View {
         } else {
             switch selection {
             case .inbox: InboxView()
-            case .sorter: FileSorterView()
             case .documents: DocumentChatView()
             case .tables: TableChatView()
             }
