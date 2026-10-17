@@ -1,8 +1,7 @@
 # Builds and tests Arca. The macOS job produces dist/Arca.app as a zip; on a
 # v* tag it also publishes that zip as a GitHub Release.
 #
-# The repository is private, so macOS minutes are billed at a premium: the
-# macOS job runs on pull requests, version tags, pushes to main and manual
+# The macOS job runs on pull requests, version tags, pushes to main and manual
 # dispatch only, and the llama.cpp build is cached by version.
 name: build
 
