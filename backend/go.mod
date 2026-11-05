@@ -2,7 +2,7 @@ module github.com/ameetmadan/arca
 
 go 1.26.0
 
-toolchain go1.26.9
+toolchain go1.27.3
 
 require (
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6
