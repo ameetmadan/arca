@@ -11,7 +11,7 @@ require (
 	github.com/go-chi/chi/v5 v5.4.0
 	github.com/ledongthuc/pdf v0.0.0-20261020125853-5e46805f718e
 	github.com/marcboeker/go-duckdb/v2 v2.4.3
-	github.com/mattn/go-sqlite3 v1.14.44
+	github.com/mattn/go-sqlite3 v1.14.53
 	github.com/nguyenthenguyen/docx v0.0.0-20230621112118-9c8e795a11db
 	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd
 	github.com/xuri/excelize/v2 v2.11.1
