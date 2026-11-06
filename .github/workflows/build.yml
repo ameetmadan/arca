@@ -30,7 +30,7 @@ jobs:
     name: Backend tests (no CGo providers)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version-file: backend/go.mod
@@ -56,7 +56,7 @@ jobs:
     permissions:
       contents: write # create the release on tags
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v5
         with:
