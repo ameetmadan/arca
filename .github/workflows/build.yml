@@ -65,7 +65,7 @@ jobs:
 
       - name: Cache llama.cpp build
         id: llama-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/llama.cpp
           key: llama-cpp-${{ env.LLAMA_CPP_REF }}-macos15-arm64-${{ hashFiles('Makefile') }}
