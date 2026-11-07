@@ -51,7 +51,7 @@ jobs:
 
   macos:
     name: macOS app (Apple Silicon)
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     permissions:
       contents: write # create the release on tags
