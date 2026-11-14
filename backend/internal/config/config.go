@@ -78,6 +78,9 @@ type App struct {
 
 	// Decision is the engine chain (rules -> semantic -> llm by default).
 	Decision decision.Engine
+	// LocalDecision is Decision without the hosted step; nil unless the
+	// chain has one. Only the benchmark uses it.
+	LocalDecision decision.Engine
 	// Rules is the rules engine inside Decision, or nil if the chain has no
 	// rules step. It is exposed so a rules API can reload it after a save.
 	Rules *rules.Engine
@@ -192,7 +195,7 @@ func Load(path string) (*App, error) {
 		app.Close()
 		return nil, err
 	}
-	app.Decision, app.Rules, app.Workers = dec.Engine, dec.Rules, dec.Workers
+	app.Decision, app.LocalDecision, app.Rules, app.Workers = dec.Engine, dec.Local, dec.Rules, dec.Workers
 	app.closers = append(app.closers, dec.Closers...)
 	app.RulesPath = dec.RulesPath
 	app.Feedback, app.Folders = dec.Feedback, dec.Folders
@@ -226,6 +229,9 @@ func expandPaths(cfg *File) {
 	cfg.Models.Dir = exp(cfg.Models.Dir)
 	for i := range cfg.Decision.Engines {
 		cfg.Decision.Engines[i].RulesPath = exp(cfg.Decision.Engines[i].RulesPath)
+		for j, f := range cfg.Decision.Engines[i].OptInFolders {
+			cfg.Decision.Engines[i].OptInFolders[j] = exp(f)
+		}
 	}
 	for i, f := range cfg.Watcher.Folders {
 		cfg.Watcher.Folders[i] = exp(f)

@@ -14,6 +14,7 @@ import (
 	"github.com/ameetmadan/arca/internal/filefacts"
 	"github.com/ameetmadan/arca/internal/pipeline"
 	"github.com/ameetmadan/arca/pkg/decision"
+	"github.com/ameetmadan/arca/pkg/decision/hosted"
 	llmengine "github.com/ameetmadan/arca/pkg/decision/llm"
 	"github.com/ameetmadan/arca/pkg/decision/rules"
 	"github.com/ameetmadan/arca/pkg/decision/semantic"
@@ -29,6 +30,9 @@ const (
 	engineRules    = "rules"
 	engineSemantic = "semantic"
 	engineLLM      = "llm"
+	// engineHosted is the optional hosted model (ADR-0008). It is never part
+	// of the default chain and needs an explicit per-folder opt-in.
+	engineHosted = "hosted"
 )
 
 // Default chain thresholds (ADR-0006). Rules are exact, so only a full match
@@ -38,6 +42,7 @@ const (
 	defaultRulesMin    = 1.0
 	defaultSemanticMin = 0.7
 	defaultLLMMin      = 0.5
+	defaultHostedMin   = 0.7
 
 	// rulesFile is the default rules file name inside the Arca app dir.
 	rulesFile = "rules.yaml"
@@ -57,7 +62,7 @@ type DecisionConfig struct {
 
 // EngineConfig configures one step of the decision chain.
 type EngineConfig struct {
-	// Type is "rules", "semantic" or "llm".
+	// Type is "rules", "semantic", "llm" or "hosted".
 	Type string `yaml:"type"`
 	// MinConfidence is the lowest confidence in [0, 1] at which this engine's
 	// answer is accepted. If omitted, the engine's default applies; an explicit
@@ -66,6 +71,14 @@ type EngineConfig struct {
 	// RulesPath is the rules YAML file (type "rules" only). If omitted it is
 	// rules.yaml in the Arca app dir. A missing file just means "no rules".
 	RulesPath string `yaml:"rules_path"`
+	// Endpoint is the https URL of the hosted decision service (type "hosted"
+	// only). The API key is never configured here: it is read from the macOS
+	// Keychain (service com.arca.hosted-decision, account default).
+	Endpoint string `yaml:"endpoint"`
+	// OptInFolders lists the watched folders whose files may be sent off this
+	// Mac to the hosted service (type "hosted" only). Each must also be in
+	// watcher.folders. Files elsewhere are never sent.
+	OptInFolders []string `yaml:"opt_in_folders"`
 }
 
 // decisionDeps are the already-wired pieces the engines are built from.
@@ -77,6 +90,9 @@ type decisionDeps struct {
 	Parser parser.DocumentParser
 	// AppDir is the Arca app dir, where rules.yaml lives by default.
 	AppDir string
+	// HostedKey supplies the hosted engine's API key. Nil means the macOS
+	// Keychain; tests inject a fake.
+	HostedKey hosted.KeySource
 }
 
 // decisionWiring is what wireDecision builds.
@@ -85,6 +101,10 @@ type decisionWiring struct {
 	Folders  semantic.FolderStore
 	// Engine is the composed chain.
 	Engine decision.Engine
+	// Local is the chain without the hosted step, for comparing the local
+	// engines with the hosted one (see cmd/decisionbench). Nil when the
+	// chain has no hosted step.
+	Local decision.Engine
 	// Steps are the chain's steps in order, for inspection and tests.
 	Steps []decision.Step
 	// Rules is the rules engine in the chain, or nil if the chain has none.
@@ -120,7 +140,7 @@ func wireDecision(cfg *File, deps decisionDeps) (_ *decisionWiring, err error) {
 	for i, ec := range engines {
 		at := fmt.Sprintf("config: decision.engines[%d]", i)
 		if ec.Type == "" {
-			return nil, fmt.Errorf("%s: type is required (rules, semantic or llm)", at)
+			return nil, fmt.Errorf("%s: type is required (rules, semantic, llm or hosted)", at)
 		}
 		if seen[ec.Type] {
 			return nil, fmt.Errorf("%s: engine %q is listed more than once", at, ec.Type)
@@ -128,6 +148,12 @@ func wireDecision(cfg *File, deps decisionDeps) (_ *decisionWiring, err error) {
 		seen[ec.Type] = true
 		if ec.RulesPath != "" && ec.Type != engineRules {
 			return nil, fmt.Errorf("%s: rules_path only applies to the %q engine", at, engineRules)
+		}
+		if (ec.Endpoint != "" || len(ec.OptInFolders) > 0) && ec.Type != engineHosted {
+			return nil, fmt.Errorf("%s: endpoint and opt_in_folders only apply to the %q engine", at, engineHosted)
+		}
+		if ec.Type == engineHosted && i != len(engines)-1 {
+			return nil, fmt.Errorf("%s: the %q engine sends data off this Mac, so it must be the last step", at, engineHosted)
 		}
 
 		var (
@@ -145,8 +171,11 @@ func wireDecision(cfg *File, deps decisionDeps) (_ *decisionWiring, err error) {
 		case engineLLM:
 			defaultMin = defaultLLMMin
 			eng, err = wireLLMEngine(cfg, deps)
+		case engineHosted:
+			defaultMin = defaultHostedMin
+			eng, err = wireHosted(cfg, ec, deps)
 		default:
-			return nil, fmt.Errorf("%s: unknown engine type %q (want rules, semantic or llm)", at, ec.Type)
+			return nil, fmt.Errorf("%s: unknown engine type %q (want rules, semantic, llm or hosted)", at, ec.Type)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", at, err)
@@ -167,6 +196,13 @@ func wireDecision(cfg *File, deps decisionDeps) (_ *decisionWiring, err error) {
 		return nil, fmt.Errorf("config: decision chain: %w", err)
 	}
 	w.Engine = chain
+	if seen[engineHosted] {
+		local, err := decision.NewChain(w.Steps[:len(w.Steps)-1]...)
+		if err != nil {
+			return nil, fmt.Errorf("config: local decision chain: %w", err)
+		}
+		w.Local = local
+	}
 	return w, nil
 }
 
@@ -266,27 +302,76 @@ func wireLLMEngine(cfg *File, deps decisionDeps) (decision.Engine, error) {
 	if deps.LLM == nil {
 		return nil, errors.New(`engine "llm" needs an LLM provider, but none is configured`)
 	}
+	return llmengine.New(llmengine.Config{
+		Provider:   deps.LLM,
+		Candidates: llmengine.CandidateFunc(folderCandidates(cfg)),
+	})
+}
+
+// wireHosted builds the optional hosted engine (ADR-0008). It is only
+// reachable for files under an opted-in folder; everything else gets
+// ErrNoDecision without any network call.
+func wireHosted(cfg *File, ec EngineConfig, deps decisionDeps) (decision.Engine, error) {
+	if ec.Endpoint == "" {
+		return nil, errors.New(`engine "hosted" needs an endpoint`)
+	}
+	if len(ec.OptInFolders) == 0 {
+		return nil, errors.New(`engine "hosted" needs opt_in_folders: it never runs unless a watched folder opts in`)
+	}
+	watched := watchedRoots(cfg)
+	var optedIn []string
+	for _, f := range ec.OptInFolders {
+		if !filepath.IsAbs(f) {
+			return nil, fmt.Errorf("opt_in_folders: %q is not an absolute path", f)
+		}
+		f = filepath.Clean(f)
+		known := false
+		for _, r := range watched {
+			known = known || r == f
+		}
+		if !known {
+			return nil, fmt.Errorf("opt_in_folders: %q is not one of watcher.folders", f)
+		}
+		optedIn = append(optedIn, f)
+	}
+	var key hosted.KeySource = &hosted.Keychain{}
+	if deps.HostedKey != nil {
+		key = deps.HostedKey
+	}
+	return hosted.New(hosted.Config{
+		Endpoint: ec.Endpoint,
+		Key:      key,
+		Allow: func(path string) bool {
+			_, ok := rootOf(optedIn, path)
+			return ok
+		},
+		Candidates: folderCandidates(cfg),
+		// hosted.Logf messages never contain file content, paths or the key.
+		Logf: log.Printf,
+	})
+}
+
+// folderCandidates returns the function that lists the existing folders of a
+// file's watched root, shallowest first, for the engines that pick one.
+func folderCandidates(cfg *File) func(ctx context.Context, f decision.Facts) ([]string, error) {
 	roots := watchedRoots(cfg)
 	src := &semantic.OSSource{}
-	return llmengine.New(llmengine.Config{
-		Provider: deps.LLM,
-		Candidates: llmengine.CandidateFunc(func(ctx context.Context, f decision.Facts) ([]string, error) {
-			root, ok := rootOf(roots, f.Path)
-			if !ok {
-				return nil, nil
-			}
-			folders, err := src.Folders(ctx, root)
-			if err != nil {
-				return nil, err
-			}
-			// The engine drops the tail when there are too many, so keep the
-			// shallow folders, which are the broadest choices.
-			sort.SliceStable(folders, func(i, j int) bool {
-				return strings.Count(folders[i], "/") < strings.Count(folders[j], "/")
-			})
-			return folders, nil
-		}),
-	})
+	return func(ctx context.Context, f decision.Facts) ([]string, error) {
+		root, ok := rootOf(roots, f.Path)
+		if !ok {
+			return nil, nil
+		}
+		folders, err := src.Folders(ctx, root)
+		if err != nil {
+			return nil, err
+		}
+		// The engines drop the tail when there are too many, so keep the
+		// shallow folders, which are the broadest choices.
+		sort.SliceStable(folders, func(i, j int) bool {
+			return strings.Count(folders[i], "/") < strings.Count(folders[j], "/")
+		})
+		return folders, nil
+	}
 }
 
 // newSemanticSource returns the folder source for the semantic indexer. Its

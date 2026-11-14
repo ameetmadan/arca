@@ -21,5 +21,6 @@ Context, Decision, Consequences, plus the alternatives that were considered.
 | [0008](0008-hosted-decision-models-optional-only.md) | Hosted decision models (e.g. Jev) are optional, opt-in providers only | Proposed | 2026-10-12 |
 | [0009](0009-ci-built-ad-hoc-signed-releases.md) | Releases are built in CI on macOS and ad-hoc signed | Proposed | 2026-10-15 |
 | [0010](0010-restart-server-to-apply-watched-folders.md) | The app restarts the server to apply watched-folder and model changes | Proposed | 2026-10-15 |
+| [0011](0011-hosted-decision-provider-implementation.md) | Hosted decision provider: implementation and benchmark | Proposed | 2026-11-14 |
 
 See [`../architecture/README.md`](../architecture/README.md) for the diagrams.

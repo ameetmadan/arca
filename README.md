@@ -206,13 +206,45 @@ decision:
     - {type: llm,      min_confidence: 0.5}   # the local LLM picks from your existing folders
 ```
 
-- `type` is `rules`, `semantic` or `llm`, each at most once. An unknown type, a `min_confidence`
+- `type` is `rules`, `semantic`, `llm` or `hosted` (see below), each at most once. An unknown type, a `min_confidence`
   outside 0 to 1, or an engine whose provider is missing makes startup fail with a message naming
   the entry.
 - `min_confidence` may be omitted; the values shown are the defaults.
 - `rules_path` (rules only) points at the rules file. A missing file just means no rules.
 - The semantic engine learns from the sub-folders of `watcher.folders` in the background after
   each start, so it has nothing to go on until that has finished.
+
+#### Hosted decision model (optional, off by default)
+
+> **Sends data off this Mac.** [ADR-0008](docs/adr/0008-hosted-decision-models-optional-only.md)
+> keeps Arca local-first, so this engine is never in the default chain. It is a last-resort step
+> for files nothing else could place, and it only runs for folders you opt in one by one.
+
+```yaml
+watcher:
+  folders: [/Users/me/Downloads, /Users/me/Documents/Inbox]
+decision:
+  engines:
+    - {type: rules}
+    - {type: semantic}
+    - {type: llm}
+    - type: hosted                              # must be the last step
+      endpoint: https://api.example.com/v1/decide
+      opt_in_folders: [/Users/me/Downloads]     # each must also be in watcher.folders
+```
+
+- Files outside `opt_in_folders` are never sent, and no network call is made for them.
+- Only a short snippet (200 characters), the file extension and the candidate folder names are
+  sent. Not the file, its name or its path.
+- The API key is never in `config.yaml`. Store it once in the Keychain:
+  `security add-generic-password -s com.arca.hosted-decision -a default -w` (it prompts for the key).
+  With no key, the step is skipped.
+- Requests time out, are retried with backoff, and a circuit breaker stops calling an unhealthy
+  service; any failure leaves the file for you to decide.
+- `cmd/decisionbench` compares the local chain with local + hosted on a labelled set of files
+  (`go run ./cmd/decisionbench -config config.yaml -labels labels.csv`, from `backend/`).
+- The request format is an adapter assumption until it is checked against the vendor's API
+  documentation ([ADR-0011](docs/adr/0011-hosted-decision-provider-implementation.md)).
 
 ### Indexing
 
