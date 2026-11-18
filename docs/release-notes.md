@@ -5,7 +5,7 @@
 3. This build is not notarized by Apple, so the first launch is blocked. Either:
    - open **Terminal** and run `xattr -dr com.apple.quarantine /Applications/Arca.app`, then open Arca normally; or
    - open Arca once, dismiss the warning, then go to **System Settings → Privacy & Security** and click **Open Anyway**.
-4. Follow the setup: pick folders (Downloads is a good start), pick a model (about 2 GB download), done.
+4. Follow the setup: pick a scratch folder with a few test files (see [TESTING.md](https://github.com/ameetmadan/arca/blob/{{TAG}}/docs/TESTING.md#before-you-start)), pick a model (about 2 GB download), done. Arca moves files when you accept a suggestion, so keep folders whose layout matters to you out of this beta.
 
 macOS may ask whether Arca may access your Documents, Desktop or Downloads folder. Allow it, otherwise Arca cannot read the folders you chose.
 

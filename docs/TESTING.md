@@ -48,18 +48,13 @@ seconds on Apple Silicon).
    **Move**, then **Undo** under "Recently moved". Try **Skip** and
    **⋯ → Choose Another Folder…** on other files.
 
-## 4. Tidy a Folder
-
-Choose `~/ArcaTest`, click **Suggest Folders**, untick a move or two, and
-click **Move**. Only loose files directly in the folder are proposed.
-
-## 5. Ask Spreadsheets
+## 4. Ask Spreadsheets
 
 Click **Import** (or drop the CSV/Excel onto the window). Ask e.g. "Total per
 category" or "Largest expense in March". Open **Query** to see the SQL that
 ran.
 
-## 6. Settings (⌘,)
+## 5. Settings (⌘,)
 
 - Change a folder's mode between Suggest and Off.
 - Add/remove a folder (the server restarts; the status at the bottom-left
@@ -83,5 +78,3 @@ ran.
   search; scanned PDFs (images) have no text to read.
 - Watched folders' sub-folders are searched, but only files arriving
   directly in a watched folder get Inbox suggestions.
-- Moves made with Tidy a Folder are recorded but not listed in the Inbox for
-  undo.

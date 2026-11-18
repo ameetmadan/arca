@@ -507,8 +507,6 @@ private struct DoneStep: View {
             VStack(alignment: .leading, spacing: 14) {
                 Feature(systemImage: "tray.full", title: "Inbox",
                         text: "When a new file lands in a watched folder, Arca suggests where it belongs. Review suggestions here.")
-                Feature(systemImage: "folder.badge.gearshape", title: "Tidy a Folder",
-                        text: "Point Arca at a messy folder and it proposes a set of sub-folders for the loose files.")
                 Feature(systemImage: "doc.text.magnifyingglass", title: "Ask Documents",
                         text: "Questions are answered from the documents in your watched folders. Reading them takes a few minutes the first time.")
                 Feature(systemImage: "tablecells", title: "Ask Spreadsheets",
