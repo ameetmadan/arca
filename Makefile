@@ -4,6 +4,8 @@ LLAMA_BUILD  := $(LLAMA_DIR)/build
 # Stamped into Info.plist by `make dist`; CI passes the tag (e.g. 0.1.0).
 VERSION      ?= 0.0.0-dev
 BUILD_NUMBER ?= 1
+# The full tag (e.g. 0.1.0-beta.3), shown in About Arca and feedback reports.
+RELEASE_LABEL ?= $(VERSION)
 
 export MACOSX_DEPLOYMENT_TARGET ?= 14.0
 
@@ -64,6 +66,7 @@ dist: backend
 	cp app/AppIcon.icns dist/Arca.app/Contents/Resources/AppIcon.icns
 	/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(VERSION)" dist/Arca.app/Contents/Info.plist
 	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(BUILD_NUMBER)" dist/Arca.app/Contents/Info.plist
+	/usr/libexec/PlistBuddy -c "Set :ArcaReleaseLabel $(RELEASE_LABEL)" dist/Arca.app/Contents/Info.plist
 	chmod +x dist/Arca.app/Contents/MacOS/Arca dist/Arca.app/Contents/Resources/arca-server
 	# Sign inside-out: the nested backend first, then the bundle.
 	codesign --force --sign - --identifier com.ameetmadan.Arca.server dist/Arca.app/Contents/Resources/arca-server

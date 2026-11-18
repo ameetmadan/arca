@@ -13,6 +13,8 @@ macOS may ask whether Arca may access your Documents, Desktop or Downloads folde
 
 See [TESTING.md](https://github.com/ameetmadan/arca/blob/{{TAG}}/docs/TESTING.md) for a 15-minute walkthrough and what feedback is most useful.
 
+Send feedback with **Help → Send Feedback…** in Arca. **Arca → Check for Updates…** opens the Releases page, where the newest beta is at the top. **Arca → About Arca** shows which one you have.
+
 ## Where things live
 
 - Settings, databases and models: `~/Library/Application Support/Arca/`

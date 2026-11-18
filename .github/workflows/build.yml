@@ -116,7 +116,7 @@ jobs:
         run: go test -tags sqlitevec,duckdb ./pkg/vector/... ./pkg/sqlengine/...
 
       - name: Build Arca.app
-        run: make dist VERSION="${{ steps.version.outputs.version }}" BUILD_NUMBER="${{ github.run_number }}"
+        run: make dist VERSION="${{ steps.version.outputs.version }}" BUILD_NUMBER="${{ github.run_number }}" RELEASE_LABEL="${{ steps.version.outputs.label }}"
 
       - name: Smoke-test the bundled backend
         run: |
