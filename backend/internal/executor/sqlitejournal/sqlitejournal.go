@@ -19,9 +19,11 @@ import (
 
 	"github.com/ameetmadan/arca/internal/executor"
 	"github.com/ameetmadan/arca/pkg/decision"
+	"github.com/ameetmadan/arca/pkg/migrate"
 )
 
-const schema = `
+// migrations is append-only; see package migrate before changing a table.
+var migrations = []string{`
 CREATE TABLE IF NOT EXISTS journal (
 	id              INTEGER PRIMARY KEY AUTOINCREMENT,
 	ts              TEXT NOT NULL,
@@ -34,7 +36,7 @@ CREATE TABLE IF NOT EXISTS journal (
 	undone_at       TEXT
 );
 CREATE INDEX IF NOT EXISTS journal_root_ts ON journal (root, ts);
-`
+`}
 
 // timeLayout keeps timestamps sortable and lossless as text.
 const timeLayout = time.RFC3339Nano
@@ -58,7 +60,7 @@ func Open(path string) (*Journal, error) {
 	}
 	// A single connection serialises writes and keeps SQLite locking simple.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	if err := migrate.Apply(context.Background(), db, migrations); err != nil {
 		db.Close() //nolint:errcheck
 		return nil, fmt.Errorf("init journal schema: %w", err)
 	}

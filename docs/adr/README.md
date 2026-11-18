@@ -22,5 +22,6 @@ Context, Decision, Consequences, plus the alternatives that were considered.
 | [0009](0009-ci-built-ad-hoc-signed-releases.md) | Releases are built in CI on macOS and ad-hoc signed | Proposed | 2026-10-15 |
 | [0010](0010-restart-server-to-apply-watched-folders.md) | The app restarts the server to apply watched-folder and model changes | Proposed | 2026-10-15 |
 | [0011](0011-hosted-decision-provider-implementation.md) | Hosted decision provider: implementation and benchmark | Proposed | 2026-11-14 |
+| [0012](0012-versioned-schema-migrations.md) | Each database records a schema version and upgrades in place | Proposed | 2026-11-18 |
 
 See [`../architecture/README.md`](../architecture/README.md) for the diagrams.

@@ -23,9 +23,11 @@ import (
 	"github.com/ameetmadan/arca/internal/decisions"
 	"github.com/ameetmadan/arca/internal/policy"
 	"github.com/ameetmadan/arca/pkg/decision"
+	"github.com/ameetmadan/arca/pkg/migrate"
 )
 
-const schema = `
+// migrations is append-only; see package migrate before changing a table.
+var migrations = []string{`
 CREATE TABLE IF NOT EXISTS decision_inputs (id INTEGER PRIMARY KEY, vector BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS feedback (
  id INTEGER PRIMARY KEY, root TEXT NOT NULL, file TEXT NOT NULL,
@@ -54,7 +56,7 @@ CREATE TABLE IF NOT EXISTS folder_policies (
 	mode           TEXT NOT NULL CHECK (mode IN ('off','suggest','auto')),
 	auto_threshold REAL NOT NULL
 );
-`
+`}
 
 // timeLayout keeps timestamps sortable and lossless as text.
 const timeLayout = time.RFC3339Nano
@@ -83,7 +85,7 @@ func Open(path string) (*Store, error) {
 	}
 	// A single connection serialises writes and keeps SQLite locking simple.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	if err := migrate.Apply(context.Background(), db, migrations); err != nil {
 		db.Close() //nolint:errcheck
 		return nil, fmt.Errorf("init decisions schema: %w", err)
 	}
