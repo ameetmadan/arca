@@ -31,3 +31,12 @@ backend/arca-server
 backend/cmd/server/server
 app/arca-server
 dist/
+
+# standards GIT-003 baseline
+node_modules/
+.venv/
+build/
+.next/
+coverage/
+__pycache__/
+.ruff_cache/

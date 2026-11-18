@@ -1,9 +1,25 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
+  "extends": ["config:recommended", ":pinAllExceptPeerDependencies"],
   "minimumReleaseAge": "2 days",
   "schedule": ["before 9am on monday"],
   "packageRules": [
+    {
+      "matchUpdateTypes": ["minor", "patch"],
+      "matchDepTypes": ["dependencies"],
+      "groupName": "production dependencies (non-major)"
+    },
+    {
+      "matchUpdateTypes": ["minor", "patch"],
+      "matchDepTypes": ["devDependencies"],
+      "groupName": "development dependencies (non-major)",
+      "automerge": true
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions",
+      "automerge": true
+    },
     {
       "matchManagers": ["gomod"],
       "matchUpdateTypes": ["minor", "patch"],
@@ -13,12 +29,9 @@
       "matchManagers": ["swift"],
       "matchUpdateTypes": ["minor", "patch"],
       "groupName": "swift packages (non-major)"
-    },
-    {
-      "matchManagers": ["github-actions"],
-      "groupName": "github actions",
-      "automerge": true
     }
   ],
-  "vulnerabilityAlerts": { "minimumReleaseAge": null }
+  "vulnerabilityAlerts": {
+    "minimumReleaseAge": null
+  }
 }
