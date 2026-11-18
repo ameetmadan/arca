@@ -16,6 +16,8 @@
     <string>1</string>
     <key>CFBundleShortVersionString</key>
     <string>1.0.0</string>
+    <key>ArcaReleaseLabel</key>
+    <string>0.0.0-dev</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleSignature</key>

@@ -25,14 +25,22 @@ struct ArcaApp: App {
             CommandGroup(replacing: .appInfo) {
                 Button("About Arca") {
                     NSApp.orderFrontStandardAboutPanel(options: [
+                        .applicationVersion: Bundle.main.releaseLabel,
                         .credits: NSAttributedString(
                             string: "A private file assistant. Everything runs on this Mac.",
                             attributes: [.font: NSFont.systemFont(ofSize: 11)]
                         )
                     ])
                 }
+                Button("Check for Updates…") { NSWorkspace.shared.open(ProjectLinks.releases) }
             }
             CommandGroup(after: .help) {
+                Button("Send Feedback…") {
+                    NSWorkspace.shared.open(ProjectLinks.feedbackIssue(
+                        arcaVersion: "\(Bundle.main.releaseLabel) (\(Bundle.main.buildNumber))",
+                        mac: ThisMac.summary
+                    ))
+                }
                 Button("Run Setup Again…") { appState.onboardingComplete = false }
                 Button("Show Server Log") { NSWorkspace.shared.activateFileViewerSelecting([BackendProcess.logURL]) }
             }

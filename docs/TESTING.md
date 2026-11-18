@@ -64,6 +64,9 @@ ran.
 
 ## Feedback that helps most
 
+Send it with **Help → Send Feedback…**. It opens a GitHub issue with your Arca
+version and Mac filled in. The issue is public, so leave out anything private.
+
 - Anything that looked stuck, confusing, or wrong, with a screenshot.
 - Wrong answers in Ask Documents/Spreadsheets: the question, the answer, and
   (for spreadsheets) the SQL shown under **Query**.

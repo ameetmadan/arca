@@ -1,0 +1,39 @@
+name: Beta feedback
+description: Something stuck, confusing or wrong in an Arca beta. In Arca, Help → Send Feedback… fills in your version and Mac.
+title: "[Beta] "
+labels: ["beta-feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing Arca. This issue is public, so leave out file contents, file names and paths you would not want others to see.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: |
+        What you did, what you saw, and what you expected instead. Paste screenshots here.
+        For a wrong answer, include the question, the answer and, for spreadsheets, the SQL under **Query**.
+        For a bad Inbox suggestion, say what kind of file it was and where it should have gone.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Arca version
+      description: Arca → About Arca
+      placeholder: 0.1.0-beta.3 (42)
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Mac
+      description: macOS version, chip and memory
+      placeholder: macOS 26.1.0, Apple M2, 16 GB
+  - type: textarea
+    id: log
+    attributes:
+      label: Server log
+      description: If something failed, paste the last lines of the log (Help → Show Server Log). Check it for file names first.
+      render: text
