@@ -18,11 +18,16 @@ import (
 	"github.com/xuri/excelize/v2"
 
 	"github.com/ameetmadan/arca/pkg/llm"
+	"github.com/ameetmadan/arca/pkg/migrate"
 	"github.com/ameetmadan/arca/pkg/sqlengine"
 )
 
 // sampleRows is how many rows of each table the LLM sees with the schema.
 const sampleRows = 3
+
+// migrations is append-only; see package migrate before changing a table.
+var migrations = []string{`CREATE TABLE IF NOT EXISTS ` + metaTable + ` (
+	name TEXT PRIMARY KEY, source TEXT NOT NULL, imported_at TIMESTAMP NOT NULL)`}
 
 // DuckDBEngine translates natural language to SQL via an LLMProvider
 // then executes the result against a local DuckDB database.
@@ -45,10 +50,9 @@ func New(dbPath string, llmProvider llm.LLMProvider) (*DuckDBEngine, error) {
 		db.Close()
 		return nil, fmt.Errorf("duckdb: ping %s: %w", dbPath, err)
 	}
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS ` + metaTable + ` (
-		name TEXT PRIMARY KEY, source TEXT NOT NULL, imported_at TIMESTAMP NOT NULL)`); err != nil {
+	if err := migrate.Apply(context.Background(), db, migrations); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("duckdb: create %s: %w", metaTable, err)
+		return nil, fmt.Errorf("duckdb: %w", err)
 	}
 	return &DuckDBEngine{DBPath: dbPath, db: db, llm: llmProvider}, nil
 }

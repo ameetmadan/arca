@@ -23,9 +23,11 @@ import (
 	_ "github.com/mattn/go-sqlite3" // registers the "sqlite3" driver
 
 	"github.com/ameetmadan/arca/pkg/decision/semantic"
+	"github.com/ameetmadan/arca/pkg/migrate"
 )
 
-const schema = `
+// migrations is append-only; see package migrate before changing a table.
+var migrations = []string{`
 CREATE TABLE IF NOT EXISTS folders (
 	root        TEXT NOT NULL,
 	rel         TEXT NOT NULL,
@@ -43,7 +45,7 @@ CREATE TABLE IF NOT EXISTS examples (
 	PRIMARY KEY (root, rel, pos),
 	FOREIGN KEY (root, rel) REFERENCES folders (root, rel) ON DELETE CASCADE
 );
-`
+`}
 
 // Store is a SQLite-backed semantic.FolderStore.
 type Store struct {
@@ -65,7 +67,7 @@ func Open(path string) (*Store, error) {
 	}
 	// A single connection serialises writes and keeps SQLite locking simple.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	if err := migrate.Apply(context.Background(), db, migrations); err != nil {
 		db.Close() //nolint:errcheck
 		return nil, fmt.Errorf("init folder store schema: %w", err)
 	}

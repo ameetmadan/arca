@@ -163,3 +163,29 @@ func TestImportRejectsUnsupportedType(t *testing.T) {
 		t.Fatal("expected an error")
 	}
 }
+
+func TestReopenKeepsImportedTables(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "t.duckdb")
+	e, err := New(path, &scriptedLLM{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.ImportFile(ctx, writeFile(t, "costs.csv", "item,amount\ntea,3\n")); err != nil {
+		t.Fatal(err)
+	}
+	e.Close()
+
+	e, err = New(path, &scriptedLLM{})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer e.Close()
+	tables, err := e.Tables(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tables) != 1 || tables[0].Name != "costs" {
+		t.Fatalf("tables = %+v, want only costs", tables)
+	}
+}

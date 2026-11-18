@@ -15,6 +15,7 @@ import (
 	vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/ameetmadan/arca/pkg/migrate"
 	"github.com/ameetmadan/arca/pkg/vector"
 )
 
@@ -32,6 +33,13 @@ type SQLiteVecStore struct {
 	dim    int // read from an existing vec_store on open, else set on first Upsert
 }
 
+// migrations is append-only; see package migrate before changing a table.
+// vec_store is not in it: ensureSchema creates it once the dimension is known.
+var migrations = []string{`CREATE TABLE IF NOT EXISTS vec_meta (
+	id       TEXT PRIMARY KEY,
+	metadata TEXT NOT NULL DEFAULT '{}'
+)`}
+
 // vecDimRe reads the dimension out of vec_store's CREATE statement.
 var vecDimRe = regexp.MustCompile(`float\[(\d+)\]`)
 
@@ -45,14 +53,9 @@ func New(dbPath string) (*SQLiteVecStore, error) {
 		return nil, fmt.Errorf("sqlitevec: ping %s: %w", dbPath, err)
 	}
 
-	// Metadata table is always created eagerly.
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS vec_meta (
-		id       TEXT PRIMARY KEY,
-		metadata TEXT NOT NULL DEFAULT '{}'
-	)`)
-	if err != nil {
+	if err := migrate.Apply(context.Background(), db, migrations); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("sqlitevec: create vec_meta: %w", err)
+		return nil, fmt.Errorf("sqlitevec: %w", err)
 	}
 
 	store := &SQLiteVecStore{DBPath: dbPath, db: db}
